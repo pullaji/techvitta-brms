@@ -1,0 +1,344 @@
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Plus,
+  Search,
+  Filter,
+  Download,
+  Receipt,
+  CreditCard,
+  Calendar,
+  DollarSign,
+  Tag,
+  MoreHorizontal,
+  Edit,
+  Trash2
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { transactionsAPI } from "@/services/supabaseApi";
+
+const getTypeIcon = (type: string) => {
+  switch (type) {
+    case "receipt":
+      return Receipt;
+    case "bank_transfer":
+      return CreditCard;
+    case "upi":
+      return CreditCard;
+    default:
+      return Receipt;
+  }
+};
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "processed":
+      return "bg-success-light text-success border-success/20";
+    case "pending":
+      return "bg-warning-light text-warning border-warning/20";
+    case "failed":
+      return "bg-destructive-light text-destructive border-destructive/20";
+    default:
+      return "bg-secondary text-secondary-foreground";
+  }
+};
+
+export default function Transactions() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  // Fetch transactions from Supabase
+  const { data: transactions, isLoading, error } = useQuery({
+    queryKey: ['transactions', { category: categoryFilter, type: typeFilter }],
+    queryFn: () => transactionsAPI.getAll({
+      category: categoryFilter === "all" ? undefined : categoryFilter,
+      type: typeFilter === "all" ? undefined : typeFilter,
+    }),
+  });
+
+  const filteredTransactions = transactions?.filter((transaction) => {
+    const matchesSearch = transaction.description
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  }) || [];
+
+  const categories = [...new Set(transactions?.map(t => t.category) || [])];
+  const types = [...new Set(transactions?.map(t => t.type) || [])];
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading transactions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-destructive mb-4">Error loading transactions</p>
+          <p className="text-muted-foreground">Please try refreshing the page</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mb-8"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="heading-xl text-4xl mb-2">Transactions</h1>
+              <p className="text-muted-foreground">
+                Manage and track all your financial transactions
+              </p>
+            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+              className="flex space-x-3 mt-4 sm:mt-0"
+            >
+              <Button variant="outline">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+              <Button className="btn-gradient">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Transaction
+              </Button>
+            </motion.div>
+          </div>
+        </motion.div>
+
+        {/* Filters */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1, duration: 0.5 }}
+          className="mb-6"
+        >
+          <Card className="card-elevated p-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search transactions..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Category Filter */}
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {categories.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      {category}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Type Filter */}
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {types.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type.replace('_', ' ').toUpperCase()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Date Range */}
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  type="date"
+                  className="pl-10"
+                />
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Transactions Table - Desktop */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.5 }}
+          className="hidden md:block"
+        >
+          <Card className="card-elevated overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    <th className="text-left p-4 font-medium text-sm">Date</th>
+                    <th className="text-left p-4 font-medium text-sm">Description</th>
+                    <th className="text-left p-4 font-medium text-sm">Category</th>
+                    <th className="text-left p-4 font-medium text-sm">Amount</th>
+                    <th className="text-left p-4 font-medium text-sm">Status</th>
+                    <th className="text-left p-4 font-medium text-sm">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTransactions.map((transaction: any, index: number) => {
+                    const TypeIcon = getTypeIcon(transaction.type);
+                    return (
+                      <motion.tr
+                        key={transaction.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.3 + index * 0.05 }}
+                        className="border-b border-border hover:bg-secondary/30 transition-colors"
+                      >
+                        <td className="p-4">
+                          <div className="text-sm text-muted-foreground">
+                            {new Date(transaction.date).toLocaleDateString()}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-2 bg-primary-light rounded-lg">
+                              <TypeIcon className="w-4 h-4 text-primary" />
+                            </div>
+                            <div>
+                              <div className="font-medium text-sm">
+                                {transaction.description}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <Badge variant="secondary" className="text-xs">
+                            {transaction.category}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div className="font-semibold">
+                            ₹{transaction.amount.toLocaleString()}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <Badge className={`text-xs ${getStatusColor(transaction.status)}`}>
+                            {transaction.status}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <Button variant="ghost" size="sm">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Transactions Cards - Mobile */}
+        <div className="md:hidden space-y-4">
+          {filteredTransactions.map((transaction: any, index: number) => {
+            const TypeIcon = getTypeIcon(transaction.type);
+            return (
+              <motion.div
+                key={transaction.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + index * 0.1 }}
+              >
+                <Card className="card-interactive p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 bg-primary-light rounded-lg">
+                        <TypeIcon className="w-4 h-4 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-sm">
+                          {transaction.description}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(transaction.date).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm">
+                      <MoreHorizontal className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Badge variant="secondary" className="text-xs">
+                        {transaction.category}
+                      </Badge>
+                      <Badge className={`text-xs ${getStatusColor(transaction.status)}`}>
+                        {transaction.status}
+                      </Badge>
+                    </div>
+                    <div className="font-semibold text-lg">
+                      ₹{transaction.amount.toLocaleString()}
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* Empty State */}
+        {filteredTransactions.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <Card className="card-elevated p-12 text-center">
+              <Receipt className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+              <h3 className="heading-md text-xl mb-2">No transactions found</h3>
+              <p className="text-muted-foreground mb-6">
+                Try adjusting your search criteria or add a new transaction.
+              </p>
+              <Button className="btn-gradient">
+                <Plus className="w-4 h-4 mr-2" />
+                Add First Transaction
+              </Button>
+            </Card>
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
