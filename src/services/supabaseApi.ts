@@ -360,7 +360,8 @@ export const uploadAPI = {
       .insert({
         file_name: fileName,
         file_url: publicUrl,
-        file_type: metadata.fileType as any,
+        file_type: fileExt?.toLowerCase() || 'unknown',
+        document_type: metadata.fileType,
         file_size_mb: file.size / (1024 * 1024),
         status: 'uploaded',
       })
@@ -369,16 +370,30 @@ export const uploadAPI = {
 
     if (recordError) throw recordError;
 
-    // If it's a receipt, create a transaction
-    if (metadata.fileType === 'receipt' && metadata.amount && metadata.date) {
-      await transactionsAPI.create({
-        amount: metadata.amount,
-        transaction_type: 'receipt',
-        category: metadata.category || 'business_expense',
-        status: 'pending',
-        notes: metadata.notes,
-        transaction_date: metadata.date,
-      });
+    // Create transaction if amount and date are provided (for any file type)
+    if (metadata.amount && metadata.date) {
+      try {
+        console.log('Creating transaction from upload:', {
+          amount: metadata.amount,
+          date: metadata.date,
+          category: metadata.category,
+          notes: metadata.notes
+        });
+        
+        const transaction = await transactionsAPI.create({
+          amount: metadata.amount,
+          transaction_type: 'receipt', // Default to receipt for all uploaded files with amount/date
+          category: metadata.category || 'Business Expense',
+          status: 'pending',
+          notes: metadata.notes || `Uploaded file: ${file.name}`,
+          transaction_date: metadata.date,
+        });
+        
+        console.log('Transaction created successfully:', transaction);
+      } catch (error) {
+        console.error('Error creating transaction from upload:', error);
+        // Don't throw error here, just log it so upload can still succeed
+      }
     }
 
     // Log audit
@@ -401,43 +416,114 @@ export const uploadAPI = {
 // Reports API
 export const reportsAPI = {
   async generate(type: string, params: any) {
-    // This would typically generate a report and return a download URL
-    // For now, we'll return mock data
+    // Get actual transaction data for the report
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('transaction_date', { ascending: false });
+
+    if (error) throw error;
+
+    // Filter transactions based on period
+    let filteredTransactions = transactions || [];
+    const now = new Date();
+    
+    if (params.period === 'monthly') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      filteredTransactions = transactions?.filter(t => 
+        new Date(t.transaction_date) >= startOfMonth
+      ) || [];
+    } else if (params.period === 'quarterly') {
+      const startOfQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      filteredTransactions = transactions?.filter(t => 
+        new Date(t.transaction_date) >= startOfQuarter
+      ) || [];
+    } else if (params.period === 'yearly') {
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      filteredTransactions = transactions?.filter(t => 
+        new Date(t.transaction_date) >= startOfYear
+      ) || [];
+    } else if (params.period === 'custom' && params.startDate && params.endDate) {
+      filteredTransactions = transactions?.filter(t => {
+        const transactionDate = new Date(t.transaction_date);
+        return transactionDate >= new Date(params.startDate) && 
+               transactionDate <= new Date(params.endDate);
+      }) || [];
+    }
+
+    // Calculate report statistics
+    const totalAmount = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const totalTransactions = filteredTransactions.length;
+    const categoryBreakdown = filteredTransactions.reduce((acc, t) => {
+      acc[t.category] = (acc[t.category] || 0) + t.amount;
+      return acc;
+    }, {} as Record<string, number>);
+
+    // Generate report data
     const reportData = {
       id: Date.now().toString(),
-      name: `${type} Report - ${new Date().toLocaleDateString()}`,
+      name: `${type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} - ${new Date().toLocaleDateString()}`,
       type,
       generatedAt: new Date().toISOString(),
-      size: "2.4 MB",
-      format: "PDF",
+      size: `${(JSON.stringify(filteredTransactions).length / 1024 / 1024).toFixed(1)} MB`,
+      format: params.format?.toUpperCase() || "PDF",
+      data: {
+        transactions: filteredTransactions,
+        summary: {
+          totalAmount,
+          totalTransactions,
+          categoryBreakdown,
+          period: params.period,
+          dateRange: {
+            start: params.startDate || (filteredTransactions[0]?.transaction_date),
+            end: params.endDate || (filteredTransactions[filteredTransactions.length - 1]?.transaction_date)
+          }
+        }
+      }
     };
 
+    // Save report to database
+    const { data: savedReport, error: saveError } = await supabase
+      .from('reports')
+      .insert({
+        report_type: type,
+        file_url: `data:application/json;base64,${btoa(JSON.stringify(reportData))}`,
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (saveError) {
+      console.error('Error saving report:', saveError);
+    }
+
     // Log audit
-    await auditAPI.logAction('export', `Report generated: ${type}`, 'admin');
+    await auditAPI.logAction('export', `Report generated: ${type} with ${totalTransactions} transactions`, 'admin');
 
     return reportData;
   },
 
   async getAll() {
-    // Return mock recent reports
-    return [
-      {
-        id: 1,
-        name: "Q1 2024 Tax Summary",
-        type: "tax_summary",
-        generatedAt: "2024-04-01",
-        size: "2.4 MB",
-        format: "PDF",
-      },
-      {
-        id: 2,
-        name: "March 2024 Expenses",
-        type: "monthly_expense",
-        generatedAt: "2024-03-31",
-        size: "1.8 MB",
-        format: "Excel",
-      },
-    ];
+    // Get real reports from database
+    const { data: reports, error } = await supabase
+      .from('reports')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching reports:', error);
+      return [];
+    }
+
+    // Transform database reports to match expected format
+    return reports?.map(report => ({
+      id: report.id,
+      name: `${report.report_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} - ${new Date(report.created_at).toLocaleDateString()}`,
+      type: report.report_type,
+      generatedAt: report.created_at,
+      size: "Generated",
+      format: "JSON"
+    })) || [];
   }
 };
 

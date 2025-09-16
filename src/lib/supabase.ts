@@ -32,18 +32,13 @@ export interface User {
 
 export interface Transaction {
   id: string;
-  description: string;
   amount: number;
-  date: string;
+  transaction_type: 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other';
   category: string;
-  type: 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other';
   status: 'pending' | 'processed' | 'failed' | 'archived';
-  receipt_url?: string;
   notes?: string;
-  user_id: string;
-  extracted_data?: any;
+  transaction_date: string;
   created_at: string;
-  updated_at: string;
 }
 
 export interface Upload {

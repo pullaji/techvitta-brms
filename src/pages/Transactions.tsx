@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
   Search,
@@ -9,18 +9,23 @@ import {
   Receipt,
   CreditCard,
   Calendar,
-  DollarSign,
   Tag,
   MoreHorizontal,
   Edit,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { transactionsAPI } from "@/services/supabaseApi";
+import { useToast } from "@/hooks/use-toast";
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -52,25 +57,183 @@ export default function Transactions() {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  const [formData, setFormData] = useState({
+    notes: "",
+    amount: "",
+    date: "",
+    category: "",
+    type: "",
+    status: "pending"
+  });
+
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Create transaction mutation
+  const createTransactionMutation = useMutation({
+    mutationFn: transactionsAPI.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      toast({
+        title: "Success!",
+        description: "Transaction created successfully.",
+      });
+      setIsAddModalOpen(false);
+      setFormData({
+        notes: "",
+        amount: "",
+        date: "",
+        category: "",
+        type: "",
+        status: "pending"
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create transaction.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update transaction mutation
+  const updateTransactionMutation = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: any }) => 
+      transactionsAPI.update(id, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      toast({
+        title: "Success!",
+        description: "Transaction updated successfully.",
+      });
+      setIsEditModalOpen(false);
+      setSelectedTransaction(null);
+      setFormData({
+        notes: "",
+        amount: "",
+        date: "",
+        category: "",
+        type: "",
+        status: "pending"
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update transaction.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete transaction mutation
+  const deleteTransactionMutation = useMutation({
+    mutationFn: transactionsAPI.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      toast({
+        title: "Success!",
+        description: "Transaction deleted successfully.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete transaction.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleDeleteTransaction = (transactionId: string) => {
+    if (window.confirm('Are you sure you want to delete this transaction?')) {
+      deleteTransactionMutation.mutate(transactionId);
+    }
+  };
+
+  const handleEditTransaction = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setFormData({
+      notes: transaction.notes || "",
+      amount: transaction.amount.toString(),
+      date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().split('T')[0] : "",
+      category: transaction.category || "",
+      type: transaction.transaction_type || "",
+      status: transaction.status || "pending"
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.notes || !formData.amount || !formData.date || !formData.category || !formData.type) {
+      toast({
+        title: "Error",
+        description: "Please fill in all required fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const transactionData = {
+      amount: parseFloat(formData.amount),
+      transaction_type: formData.type as 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other',
+      category: formData.category,
+      status: formData.status as 'pending' | 'processed' | 'failed' | 'archived',
+      notes: formData.notes,
+      transaction_date: formData.date,
+    };
+
+    if (selectedTransaction) {
+      // Update existing transaction
+      updateTransactionMutation.mutate({ 
+        id: selectedTransaction.id, 
+        updates: transactionData 
+      });
+    } else {
+      // Create new transaction
+      createTransactionMutation.mutate(transactionData);
+    }
+  };
 
   // Fetch transactions from Supabase
   const { data: transactions, isLoading, error } = useQuery({
     queryKey: ['transactions', { category: categoryFilter, type: typeFilter }],
     queryFn: () => transactionsAPI.getAll({
       category: categoryFilter === "all" ? undefined : categoryFilter,
-      type: typeFilter === "all" ? undefined : typeFilter,
+      transaction_type: typeFilter === "all" ? undefined : typeFilter,
     }),
   });
 
   const filteredTransactions = transactions?.filter((transaction) => {
-    const matchesSearch = transaction.description
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
+    const matchesSearch = transaction.notes
+      ?.toLowerCase()
+      .includes(searchTerm.toLowerCase()) || false;
     return matchesSearch;
   }) || [];
 
   const categories = [...new Set(transactions?.map(t => t.category) || [])];
-  const types = [...new Set(transactions?.map(t => t.type) || [])];
+  const types = [...new Set(transactions?.map(t => t.transaction_type) || [])];
 
   if (isLoading) {
     return (
@@ -121,7 +284,7 @@ export default function Transactions() {
                 <Download className="w-4 h-4 mr-2" />
                 Export
               </Button>
-              <Button className="btn-gradient">
+              <Button className="btn-gradient" onClick={() => setIsAddModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Transaction
               </Button>
@@ -213,7 +376,7 @@ export default function Transactions() {
                 </thead>
                 <tbody>
                   {filteredTransactions.map((transaction: any, index: number) => {
-                    const TypeIcon = getTypeIcon(transaction.type);
+                    const TypeIcon = getTypeIcon(transaction.transaction_type);
                     return (
                       <motion.tr
                         key={transaction.id}
@@ -224,7 +387,7 @@ export default function Transactions() {
                       >
                         <td className="p-4">
                           <div className="text-sm text-muted-foreground">
-                            {new Date(transaction.date).toLocaleDateString()}
+                            {new Date(transaction.transaction_date).toLocaleDateString()}
                           </div>
                         </td>
                         <td className="p-4">
@@ -234,7 +397,7 @@ export default function Transactions() {
                             </div>
                             <div>
                               <div className="font-medium text-sm">
-                                {transaction.description}
+                                {transaction.notes || 'No notes'}
                               </div>
                             </div>
                           </div>
@@ -255,9 +418,26 @@ export default function Transactions() {
                           </Badge>
                         </td>
                         <td className="p-4">
-                          <Button variant="ghost" size="sm">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreHorizontal className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleEditTransaction(transaction)}>
+                                <Edit className="w-4 h-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => handleDeleteTransaction(transaction.id)}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </td>
                       </motion.tr>
                     );
@@ -271,7 +451,7 @@ export default function Transactions() {
         {/* Transactions Cards - Mobile */}
         <div className="md:hidden space-y-4">
           {filteredTransactions.map((transaction: any, index: number) => {
-            const TypeIcon = getTypeIcon(transaction.type);
+            const TypeIcon = getTypeIcon(transaction.transaction_type);
             return (
               <motion.div
                 key={transaction.id}
@@ -287,16 +467,33 @@ export default function Transactions() {
                       </div>
                       <div>
                         <h3 className="font-medium text-sm">
-                          {transaction.description}
+                          {transaction.notes || 'No notes'}
                         </h3>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(transaction.date).toLocaleDateString()}
+                          {new Date(transaction.transaction_date).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditTransaction(transaction)}>
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => handleDeleteTransaction(transaction.id)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                   
                   <div className="flex items-center justify-between">
@@ -331,13 +528,264 @@ export default function Transactions() {
               <p className="text-muted-foreground mb-6">
                 Try adjusting your search criteria or add a new transaction.
               </p>
-              <Button className="btn-gradient">
+              <Button className="btn-gradient" onClick={() => setIsAddModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add First Transaction
               </Button>
             </Card>
           </motion.div>
         )}
+
+        {/* Add Transaction Modal */}
+        <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Add New Transaction</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description *</Label>
+                  <Input
+                    id="notes"
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleInputChange}
+                    placeholder="Enter transaction notes"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount *</Label>
+                  <Input
+                    id="amount"
+                    name="amount"
+                    type="number"
+                    step="0.01"
+                    value={formData.amount}
+                    onChange={handleInputChange}
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="date">Date *</Label>
+                  <Input
+                    id="date"
+                    name="date"
+                    type="date"
+                    value={formData.date}
+                    onChange={handleInputChange}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category *</Label>
+                  <Select value={formData.category} onValueChange={(value) => handleSelectChange('category', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Business Expense">Business Expense</SelectItem>
+                      <SelectItem value="Personal Expense">Personal Expense</SelectItem>
+                      <SelectItem value="Travel & Transport">Travel & Transport</SelectItem>
+                      <SelectItem value="Meals & Entertainment">Meals & Entertainment</SelectItem>
+                      <SelectItem value="Office Supplies">Office Supplies</SelectItem>
+                      <SelectItem value="Software & Subscriptions">Software & Subscriptions</SelectItem>
+                      <SelectItem value="Utilities">Utilities</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="type">Type *</Label>
+                  <Select value={formData.type} onValueChange={(value) => handleSelectChange('type', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="receipt">Receipt</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="upi">UPI</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="status">Status</Label>
+                  <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="processed">Processed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleInputChange}
+                  placeholder="Additional notes (optional)"
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="btn-gradient"
+                  disabled={createTransactionMutation.isPending}
+                >
+                  {createTransactionMutation.isPending ? "Creating..." : "Create Transaction"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Transaction Modal */}
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Edit Transaction</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-notes">Description *</Label>
+                  <Input
+                    id="edit-notes"
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleInputChange}
+                    placeholder="Enter transaction notes"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-amount">Amount *</Label>
+                  <Input
+                    id="edit-amount"
+                    name="amount"
+                    type="number"
+                    step="0.01"
+                    value={formData.amount}
+                    onChange={handleInputChange}
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-date">Date *</Label>
+                  <Input
+                    id="edit-date"
+                    name="date"
+                    type="date"
+                    value={formData.date}
+                    onChange={handleInputChange}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-category">Category *</Label>
+                  <Select value={formData.category} onValueChange={(value) => handleSelectChange('category', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Business Expense">Business Expense</SelectItem>
+                      <SelectItem value="Personal Expense">Personal Expense</SelectItem>
+                      <SelectItem value="Travel & Transport">Travel & Transport</SelectItem>
+                      <SelectItem value="Meals & Entertainment">Meals & Entertainment</SelectItem>
+                      <SelectItem value="Office Supplies">Office Supplies</SelectItem>
+                      <SelectItem value="Software & Subscriptions">Software & Subscriptions</SelectItem>
+                      <SelectItem value="Utilities">Utilities</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-type">Type *</Label>
+                  <Select value={formData.type} onValueChange={(value) => handleSelectChange('type', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="receipt">Receipt</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="upi">UPI</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-status">Status</Label>
+                  <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="processed">Processed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setSelectedTransaction(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="btn-gradient"
+                  disabled={updateTransactionMutation.isPending}
+                >
+                  {updateTransactionMutation.isPending ? "Updating..." : "Update Transaction"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

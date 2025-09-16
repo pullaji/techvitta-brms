@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { auditAPI } from "@/services/supabaseApi";
 import {
   Activity,
   Upload,
@@ -22,59 +24,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-// Sample audit log data
-const auditLogs = [
-  {
-    id: 1,
-    action: "upload",
-    description: "Uploaded bank statement - HDFC_March_2024.pdf",
-    user: "Administrator",
-    timestamp: "2024-01-15T10:30:00Z",
-    status: "success",
-    details: "File processed successfully, 23 transactions extracted",
-    ipAddress: "192.168.1.100",
-  },
-  {
-    id: 2,
-    action: "export",
-    description: "Generated quarterly tax report Q1-2024",
-    user: "Administrator", 
-    timestamp: "2024-01-15T09:15:00Z",
-    status: "success",
-    details: "PDF report generated with 156 transactions",
-    ipAddress: "192.168.1.100",
-  },
-  {
-    id: 3,
-    action: "delete",
-    description: "Deleted duplicate receipt - Amazon_order_12345.jpg",
-    user: "Administrator",
-    timestamp: "2024-01-14T16:45:00Z", 
-    status: "success",
-    details: "Duplicate receipt removed from system",
-    ipAddress: "192.168.1.100",
-  },
-  {
-    id: 4,
-    action: "edit",
-    description: "Updated transaction category - Office supplies to Business expense",
-    user: "Administrator",
-    timestamp: "2024-01-14T14:20:00Z",
-    status: "success",
-    details: "Transaction ID: TXN_001234",
-    ipAddress: "192.168.1.100",
-  },
-  {
-    id: 5,
-    action: "upload",
-    description: "Failed to upload corrupted file - receipt_scan.pdf",
-    user: "Administrator",
-    timestamp: "2024-01-14T11:30:00Z",
-    status: "failed",
-    details: "File validation failed - corrupted PDF structure",
-    ipAddress: "192.168.1.100",
-  },
-];
+// Remove dummy data - will use real data from database
 
 const actionIcons = {
   upload: Upload,
@@ -112,17 +62,27 @@ export default function Audit() {
   const [statusFilter, setStatusFilter] = useState("");
   const [dateRange, setDateRange] = useState("");
 
-  const filteredLogs = auditLogs.filter((log) => {
-    const matchesSearch = log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.user.toLowerCase().includes(searchTerm.toLowerCase());
+  // Fetch real audit logs from database
+  const { data: auditLogs = [], isLoading, error } = useQuery({
+    queryKey: ['audit-logs', { action: actionFilter, status: statusFilter }],
+    queryFn: () => auditAPI.getLogs({ 
+      action: actionFilter === "all" ? undefined : actionFilter,
+      limit: 100 
+    }),
+    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+  });
+
+  const filteredLogs = auditLogs.filter((log: any) => {
+    const matchesSearch = (log.details?.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (log.details?.userId || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesAction = !actionFilter || actionFilter === "all" || log.action === actionFilter;
     const matchesStatus = !statusFilter || statusFilter === "all" || log.status === statusFilter;
     
     return matchesSearch && matchesAction && matchesStatus;
   });
 
-  const actions = [...new Set(auditLogs.map(log => log.action))];
-  const statuses = [...new Set(auditLogs.map(log => log.status))];
+  const actions = [...new Set((auditLogs || []).map((log: any) => log.action).filter(action => action))];
+  const statuses = [...new Set((auditLogs || []).map((log: any) => log.status).filter(status => status))];
 
   const formatDateTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -130,6 +90,38 @@ export default function Audit() {
       date: date.toLocaleDateString(),
       time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
+  };
+
+  const handleExportLogs = () => {
+    if (!auditLogs.length) return;
+    
+    // Create CSV content
+    const headers = ['Date', 'Time', 'Action', 'Description', 'User', 'Status', 'IP Address'];
+    const csvContent = [
+      headers.join(','),
+      ...auditLogs.map((log: any) => {
+        const dateTime = formatDateTime(log.created_at);
+        return [
+          dateTime.date,
+          dateTime.time,
+          log.action,
+          `"${log.details?.description || `${log.action} action performed`}"`,
+          log.details?.userId || 'System',
+          log.status,
+          log.ip_address || 'N/A'
+        ].join(',');
+      })
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -155,7 +147,7 @@ export default function Audit() {
               transition={{ delay: 0.2 }}
               className="flex space-x-3 mt-4 sm:mt-0"
             >
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleExportLogs} disabled={!auditLogs.length}>
                 <Download className="w-4 h-4 mr-2" />
                 Export Log
               </Button>
@@ -194,7 +186,7 @@ export default function Audit() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Actions</SelectItem>
-                  {actions.map((action) => (
+                  {actions.filter(action => action).map((action) => (
                     <SelectItem key={action} value={action}>
                       {action.charAt(0).toUpperCase() + action.slice(1)}
                     </SelectItem>
@@ -209,7 +201,7 @@ export default function Audit() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
-                  {statuses.map((status) => (
+                  {statuses.filter(status => status).map((status) => (
                     <SelectItem key={status} value={status}>
                       {status.charAt(0).toUpperCase() + status.slice(1)}
                     </SelectItem>
@@ -244,66 +236,80 @@ export default function Audit() {
             </h3>
 
             <div className="space-y-6">
-              {filteredLogs.map((log, index) => {
-                const ActionIcon = actionIcons[log.action as keyof typeof actionIcons] || Activity;
-                const StatusIcon = statusIcons[log.status as keyof typeof statusIcons] || CheckCircle2;
-                const dateTime = formatDateTime(log.timestamp);
-                
-                return (
-                  <motion.div
-                    key={log.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.3 + index * 0.05 }}
-                    className="relative"
-                  >
-                    {/* Timeline line */}
-                    {index < filteredLogs.length - 1 && (
-                      <div className="absolute left-8 top-12 w-px h-16 bg-border" />
-                    )}
-                    
-                    <div className="flex items-start space-x-4">
-                      {/* Action Icon */}
-                      <div className={`p-3 rounded-full ${actionColors[log.action as keyof typeof actionColors] || 'text-gray-600 bg-gray-50'}`}>
-                        <ActionIcon className="w-5 h-5" />
-                      </div>
+              {isLoading ? (
+                <div className="text-center py-8">
+                  <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-muted-foreground">Loading audit logs...</p>
+                </div>
+              ) : error ? (
+                <div className="text-center py-8">
+                  <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
+                  <p className="text-destructive">Failed to load audit logs</p>
+                </div>
+              ) : (
+                filteredLogs.map((log: any, index: number) => {
+                  const ActionIcon = actionIcons[log.action as keyof typeof actionIcons] || Activity;
+                  const StatusIcon = statusIcons[log.status as keyof typeof statusIcons] || CheckCircle2;
+                  const dateTime = formatDateTime(log.created_at);
+                  
+                  return (
+                    <motion.div
+                      key={log.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3 + index * 0.05 }}
+                      className="relative"
+                    >
+                      {/* Timeline line */}
+                      {index < filteredLogs.length - 1 && (
+                        <div className="absolute left-8 top-12 w-px h-16 bg-border" />
+                      )}
+                      
+                      <div className="flex items-start space-x-4">
+                        {/* Action Icon */}
+                        <div className={`p-3 rounded-full ${actionColors[log.action as keyof typeof actionColors] || 'text-gray-600 bg-gray-50'}`}>
+                          <ActionIcon className="w-5 h-5" />
+                        </div>
 
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center space-x-3 mb-1">
-                              <h4 className="font-medium text-foreground">
-                                {log.description}
-                              </h4>
-                              <Badge className={`text-xs ${statusColors[log.status as keyof typeof statusColors]}`}>
-                                <StatusIcon className="w-3 h-3 mr-1" />
-                                {log.status}
-                              </Badge>
-                            </div>
-                            
-                            <p className="text-sm text-muted-foreground mb-2">
-                              {log.details}
-                            </p>
-                            
-                            <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                              <div className="flex items-center space-x-1">
-                                <User className="w-3 h-3" />
-                                <span>{log.user}</span>
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-3 mb-1">
+                                <h4 className="font-medium text-foreground">
+                                  {log.details?.description || `${log.action} action performed`}
+                                </h4>
+                                <Badge className={`text-xs ${statusColors[log.status as keyof typeof statusColors]}`}>
+                                  <StatusIcon className="w-3 h-3 mr-1" />
+                                  {log.status}
+                                </Badge>
                               </div>
-                              <div className="flex items-center space-x-1">
-                                <Clock className="w-3 h-3" />
-                                <span>{dateTime.date} at {dateTime.time}</span>
+                              
+                              <p className="text-sm text-muted-foreground mb-2">
+                                {log.details?.details || `Action: ${log.action}`}
+                              </p>
+                              
+                              <div className="flex items-center space-x-4 text-xs text-muted-foreground">
+                                <div className="flex items-center space-x-1">
+                                  <User className="w-3 h-3" />
+                                  <span>{log.details?.userId || 'System'}</span>
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{dateTime.date} at {dateTime.time}</span>
+                                </div>
+                                {log.ip_address && (
+                                  <span className="hidden sm:inline">IP: {log.ip_address}</span>
+                                )}
                               </div>
-                              <span className="hidden sm:inline">IP: {log.ipAddress}</span>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
+                    </motion.div>
+                  );
+                })
+              )}
             </div>
 
             {/* Empty State */}
@@ -334,7 +340,9 @@ export default function Audit() {
             <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <Upload className="w-6 h-6 text-blue-600" />
             </div>
-            <div className="text-2xl font-bold text-foreground">156</div>
+            <div className="text-2xl font-bold text-foreground">
+              {auditLogs.filter((log: any) => log.action === 'upload').length}
+            </div>
             <div className="text-sm text-muted-foreground">Total Uploads</div>
           </Card>
 
@@ -342,7 +350,11 @@ export default function Audit() {
             <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle2 className="w-6 h-6 text-green-600" />
             </div>
-            <div className="text-2xl font-bold text-foreground">98.2%</div>
+            <div className="text-2xl font-bold text-foreground">
+              {auditLogs.length > 0 
+                ? Math.round((auditLogs.filter((log: any) => log.status === 'success').length / auditLogs.length) * 100)
+                : 0}%
+            </div>
             <div className="text-sm text-muted-foreground">Success Rate</div>
           </Card>
 
@@ -350,7 +362,7 @@ export default function Audit() {
             <div className="w-12 h-12 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-3">
               <Activity className="w-6 h-6 text-purple-600" />
             </div>
-            <div className="text-2xl font-bold text-foreground">2,847</div>
+            <div className="text-2xl font-bold text-foreground">{auditLogs.length}</div>
             <div className="text-sm text-muted-foreground">Total Actions</div>
           </Card>
         </motion.div>
