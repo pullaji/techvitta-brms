@@ -10,37 +10,15 @@ import {
   X,
   Check,
   AlertCircle,
-  Calendar,
-  Tag,
   FileImage
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { uploadAPI, transactionsAPI } from "@/services/supabaseApi";
 
-const fileTypes = [
-  { id: "bank_statement", name: "Bank Statement", icon: FileText, color: "text-blue-600" },
-  { id: "receipt", name: "Receipt", icon: Receipt, color: "text-green-600" },
-  { id: "upi_proof", name: "UPI Transaction", icon: CreditCard, color: "text-purple-600" },
-];
-
-const categories = [
-  "Business Expense",
-  "Personal Expense", 
-  "Travel & Transport",
-  "Meals & Entertainment",
-  "Office Supplies",
-  "Software & Subscriptions",
-  "Utilities",
-  "Other"
-];
 
 export default function Upload() {
   const [files, setFiles] = useState<File[]>([]);
@@ -48,13 +26,6 @@ export default function Upload() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
-  const [formData, setFormData] = useState({
-    fileType: "",
-    date: "",
-    amount: "",
-    category: "",
-    notes: "",
-  });
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -67,9 +38,7 @@ export default function Upload() {
       setUploadedFiles(prev => [...prev, { ...data, originalFile: variables.file }]);
       
       // Invalidate transactions query to refresh the transactions list
-      if (variables.metadata.amount && variables.metadata.date) {
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      }
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
       
       toast({
         title: "File uploaded successfully!",
@@ -137,16 +106,6 @@ export default function Upload() {
 
     setFiles(validFiles);
     setUploadComplete(false);
-    
-    // Auto-detect file type based on name
-    const fileName = validFiles[0]?.name.toLowerCase() || "";
-    if (fileName.includes("statement") || fileName.includes("bank")) {
-      setFormData(prev => ({ ...prev, fileType: "bank_statement" }));
-    } else if (fileName.includes("receipt")) {
-      setFormData(prev => ({ ...prev, fileType: "receipt" }));
-    } else if (fileName.includes("upi") || fileName.includes("payment")) {
-      setFormData(prev => ({ ...prev, fileType: "upi_proof" }));
-    }
   }, [toast]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -166,26 +125,12 @@ export default function Upload() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const handleUpload = async () => {
     if (files.length === 0) {
       toast({
         title: "No files selected",
         description: "Please select at least one file to upload.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!formData.fileType || !formData.category) {
-      toast({
-        title: "Missing required fields",
-        description: "Please fill in all required fields.",
         variant: "destructive",
       });
       return;
@@ -203,43 +148,32 @@ export default function Upload() {
         // Update progress
         setUploadProgress((i / files.length) * 100);
 
-        // Prepare metadata
+        // Prepare metadata (minimal metadata for simple upload)
         const metadata = {
-          fileType: formData.fileType,
-          category: formData.category,
-          amount: formData.amount ? parseFloat(formData.amount) : undefined,
-          date: formData.date || undefined,
-          notes: formData.notes || undefined,
+          fileType: "document",
+          category: "General",
         };
 
-        // Upload file (this will also create transaction if amount and date are provided)
+        // Upload file
         await uploadMutation.mutateAsync({ file, metadata });
       }
 
       // Complete upload
       setUploadProgress(100);
-          setIsUploading(false);
-          setUploadComplete(true);
-          
-          const transactionCount = files.filter((_, i) => formData.amount && formData.date).length;
-          toast({
-            title: "Upload successful!",
-            description: `${files.length} file(s) uploaded and processed successfully.${transactionCount > 0 ? ` ${transactionCount} transaction(s) created.` : ''}`,
-          });
-          
-          // Reset form after 3 seconds
-          setTimeout(() => {
-            setFiles([]);
-            setUploadComplete(false);
+      setIsUploading(false);
+      setUploadComplete(true);
+      
+      toast({
+        title: "Upload successful!",
+        description: `${files.length} file(s) uploaded and processed successfully.`,
+      });
+      
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setFiles([]);
+        setUploadComplete(false);
         setUploadedFiles([]);
-            setFormData({
-              fileType: "",
-              date: "",
-              amount: "",
-              category: "",
-              notes: "",
-            });
-          }, 3000);
+      }, 3000);
           
     } catch (error: any) {
       setIsUploading(false);
@@ -251,7 +185,6 @@ export default function Upload() {
     }
   };
 
-  const selectedFileType = fileTypes.find(type => type.id === formData.fileType);
 
   return (
     <div className="min-h-screen bg-gradient">
@@ -281,9 +214,7 @@ export default function Upload() {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8">
-          {/* Upload Area */}
-          <div className="lg:col-span-2 space-y-6">
+        <div className="max-w-4xl mx-auto space-y-6">
             {/* File Drop Zone */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -485,11 +416,57 @@ export default function Upload() {
                         <div className="flex flex-wrap gap-2">
                           <Badge variant="secondary" className="text-xs">Processed</Badge>
                           <Badge variant="secondary" className="text-xs">Ready for Review</Badge>
-                          {formData.amount && formData.date && (
-                            <Badge variant="secondary" className="text-xs">Transaction Created</Badge>
-                          )}
                         </div>
                       </div>
+                    </div>
+                  </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Upload Button */}
+            <AnimatePresence>
+              {files.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Card className="card-elevated p-4 sm:p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="heading-md text-lg mb-2">Ready to Upload</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {files.length} file{files.length > 1 ? 's' : ''} selected and ready for upload
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleUpload}
+                        disabled={isUploading || uploadComplete}
+                        className="btn-gradient h-12 px-8 text-base font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                      >
+                        {isUploading ? (
+                          <>
+                            <motion.div
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                              className="w-5 h-5 border-2 border-white border-t-transparent rounded-full mr-2"
+                            />
+                            Uploading...
+                          </>
+                        ) : uploadComplete ? (
+                          <>
+                            <Check className="w-5 h-5 mr-2" />
+                            Complete
+                          </>
+                        ) : (
+                          <>
+                            <UploadIcon className="w-5 h-5 mr-2" />
+                            Upload Files
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </Card>
                 </motion.div>
@@ -531,11 +508,6 @@ export default function Upload() {
                             <Badge variant="secondary" className="text-xs">
                               {uploadedFile.status}
                             </Badge>
-                            {formData.amount && formData.date && (
-                              <Badge variant="outline" className="text-xs text-primary">
-                                Transaction Created
-                              </Badge>
-                            )}
                           </div>
                         </motion.div>
                       ))}
@@ -544,183 +516,6 @@ export default function Upload() {
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
-
-          {/* Metadata Form */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="xl:col-span-1"
-          >
-            <Card className="card-elevated p-4 sm:p-6 sticky top-24">
-              <div className="flex items-center space-x-2 mb-6">
-                <div className="w-8 h-8 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center">
-                  <Tag className="w-4 h-4 text-white" />
-                </div>
-                <h3 className="heading-md text-lg">Document Details</h3>
-              </div>
-              
-              <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-                {/* File Type */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold flex items-center space-x-1">
-                    <span>Document Type</span>
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={formData.fileType}
-                    onValueChange={(value) => handleInputChange("fileType", value)}
-                  >
-                    <SelectTrigger className="h-12 border-2 focus:border-primary transition-colors">
-                      <SelectValue placeholder="Select document type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {fileTypes.map((type) => {
-                        const Icon = type.icon;
-                        return (
-                          <SelectItem key={type.id} value={type.id} className="py-3">
-                            <div className="flex items-center space-x-3">
-                              <Icon className={`w-5 h-5 ${type.color}`} />
-                              <span className="font-medium">{type.name}</span>
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Date */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Transaction Date</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      type="date"
-                      value={formData.date}
-                      onChange={(e) => handleInputChange("date", e.target.value)}
-                      className="h-12 pl-10 border-2 focus:border-primary transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* Amount */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Amount</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">₹</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={formData.amount}
-                      onChange={(e) => handleInputChange("amount", e.target.value)}
-                      className="h-12 pl-8 border-2 focus:border-primary transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* Category */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold flex items-center space-x-1">
-                    <span>Category</span>
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={formData.category}
-                    onValueChange={(value) => handleInputChange("category", value)}
-                  >
-                    <SelectTrigger className="h-12 border-2 focus:border-primary transition-colors">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((category) => (
-                        <SelectItem key={category} value={category} className="py-3">
-                          <span className="font-medium">{category}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Notes */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Notes</Label>
-                  <Textarea
-                    placeholder="Add any additional notes..."
-                    value={formData.notes}
-                    onChange={(e) => handleInputChange("notes", e.target.value)}
-                    rows={3}
-                    className="resize-none border-2 focus:border-primary transition-colors"
-                  />
-                </div>
-
-                {/* Submit Button */}
-                <Button
-                  type="submit"
-                  disabled={isUploading || uploadComplete || files.length === 0}
-                  className="w-full btn-gradient h-12 text-base font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
-                >
-                  {isUploading ? (
-                    <>
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="w-5 h-5 border-2 border-white border-t-transparent rounded-full mr-2"
-                      />
-                      Uploading...
-                    </>
-                  ) : uploadComplete ? (
-                    <>
-                      <Check className="w-5 h-5 mr-2" />
-                      Complete
-                    </>
-                  ) : (
-                    <>
-                      <UploadIcon className="w-5 h-5 mr-2" />
-                      Upload Documents
-                    </>
-                  )}
-                </Button>
-              </form>
-
-              {/* File Type Info */}
-              {selectedFileType && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-6 p-4 bg-gradient-to-r from-primary-light to-primary-light/50 rounded-xl border border-primary/20"
-                >
-                  <div className="flex items-center space-x-3 mb-2">
-                    <selectedFileType.icon className={`w-5 h-5 ${selectedFileType.color}`} />
-                    <span className="text-sm font-semibold">{selectedFileType.name}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    This document will be processed and added to your financial records.
-                  </p>
-                </motion.div>
-              )}
-
-              {/* Quick Tips */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
-                className="mt-6 p-4 bg-secondary/30 rounded-xl"
-              >
-                <h4 className="text-sm font-semibold mb-2 flex items-center space-x-2">
-                  <AlertCircle className="w-4 h-4 text-primary" />
-                  <span>Quick Tips</span>
-                </h4>
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  <li>• Supported formats: PDF, JPG, PNG, CSV, XLS</li>
-                  <li>• Maximum file size: 10MB per file</li>
-                  <li>• You can upload up to 5 files at once</li>
-                </ul>
-              </motion.div>
-            </Card>
-          </motion.div>
         </div>
       </div>
     </div>
