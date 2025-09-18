@@ -243,15 +243,15 @@ export default function Reports() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 sm:mb-8"
         >
-          <h1 className="heading-xl text-4xl mb-2">Reports & Analytics</h1>
-          <p className="text-muted-foreground">
+          <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Reports & Analytics</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">
             Generate comprehensive financial reports and export your data
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           {/* Report Generation */}
           <div className="lg:col-span-2 space-y-6">
             {/* Report Configuration */}
@@ -260,10 +260,10 @@ export default function Reports() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.5 }}
             >
-              <Card className="card-elevated p-6">
-                <h3 className="heading-md text-xl mb-6">Generate New Report</h3>
+              <Card className="card-elevated p-4 sm:p-6">
+                <h3 className="heading-md text-lg sm:text-xl mb-4 sm:mb-6">Generate New Report</h3>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
                   <div>
                     <label className="text-sm font-medium mb-2 block">Report Period</label>
                     <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>

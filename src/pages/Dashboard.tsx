@@ -63,14 +63,15 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 sm:mb-8"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="heading-xl text-4xl mb-2">Dashboard</h1>
-              <p className="text-muted-foreground flex items-center">
-                <Calendar className="w-4 h-4 mr-2" />
-                Welcome back, here's what's happening with your receipts today.
+            <div className="mb-4 sm:mb-0">
+              <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Dashboard</h1>
+              <p className="text-muted-foreground text-sm sm:text-base flex items-center">
+                <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
+                <span className="hidden sm:inline">Welcome back, here's what's happening with your receipts today.</span>
+                <span className="sm:hidden">Your financial overview</span>
               </p>
             </div>
             <motion.div
@@ -78,9 +79,10 @@ export default function Dashboard() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.2 }}
             >
-              <Button className="btn-gradient mt-4 sm:mt-0">
+              <Button className="btn-gradient w-full sm:w-auto">
                 <Upload className="w-4 h-4 mr-2" />
-                Quick Upload
+                <span className="hidden sm:inline">Quick Upload</span>
+                <span className="sm:hidden">Upload</span>
               </Button>
             </motion.div>
           </div>
@@ -91,7 +93,7 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.5 }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
+          className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8"
         >
           {stats?.map((stat: any, index: number) => {
             const Icon = stat.icon === 'FileText' ? FileText : 
@@ -106,19 +108,19 @@ export default function Dashboard() {
                 transition={{ delay: 0.1 + index * 0.1 }}
                 whileHover={{ y: -2 }}
               >
-                <Card className="card-interactive p-6">
+                <Card className="card-interactive p-3 sm:p-6">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-1">{stat.name}</p>
-                      <p className="heading-md text-2xl font-semibold">{stat.value}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1 truncate">{stat.name}</p>
+                      <p className="heading-md text-lg sm:text-2xl font-semibold">{stat.value}</p>
                       <p className={`text-xs mt-1 ${
                         stat.change.startsWith('+') ? 'text-success' : 'text-muted-foreground'
                       }`}>
                         {stat.change}
                       </p>
                     </div>
-                    <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                      <Icon className={`w-6 h-6 ${stat.color}`} />
+                    <div className={`p-2 sm:p-3 rounded-xl ${stat.bgColor} flex-shrink-0 ml-2`}>
+                      <Icon className={`w-4 h-4 sm:w-6 sm:h-6 ${stat.color}`} />
                     </div>
                   </div>
                 </Card>
@@ -127,7 +129,7 @@ export default function Dashboard() {
           })}
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           {/* Category Breakdown Chart */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}

@@ -18,6 +18,8 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { uploadAPI, transactionsAPI } from "@/services/supabaseApi";
+import { BankStatementViewer } from "@/components/BankStatementViewer";
+import { ParsedBankStatement } from "@/services/pdfParser";
 
 
 export default function Upload() {
@@ -26,6 +28,7 @@ export default function Upload() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [parsedBankStatement, setParsedBankStatement] = useState<ParsedBankStatement | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -37,8 +40,13 @@ export default function Upload() {
     onSuccess: (data, variables) => {
       setUploadedFiles(prev => [...prev, { ...data, originalFile: variables.file }]);
       
+      // Check if this was a PDF bank statement and capture parsed data
+      if (variables.file.type === 'application/pdf' && data.parsedStatement) {
+        setParsedBankStatement(data.parsedStatement);
+      }
+      
       // Invalidate transactions query to refresh the transactions list
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
       
       toast({
         title: "File uploaded successfully!",
@@ -151,7 +159,7 @@ export default function Upload() {
         // Prepare metadata (minimal metadata for simple upload)
         const metadata = {
           fileType: "document",
-          category: "General",
+          category: "business_expense",
         };
 
         // Upload file
@@ -160,20 +168,20 @@ export default function Upload() {
 
       // Complete upload
       setUploadProgress(100);
-      setIsUploading(false);
-      setUploadComplete(true);
-      
-      toast({
-        title: "Upload successful!",
+          setIsUploading(false);
+          setUploadComplete(true);
+          
+          toast({
+            title: "Upload successful!",
         description: `${files.length} file(s) uploaded and processed successfully.`,
-      });
-      
+          });
+          
       // Reset after 3 seconds
-      setTimeout(() => {
-        setFiles([]);
-        setUploadComplete(false);
+          setTimeout(() => {
+            setFiles([]);
+            setUploadComplete(false);
         setUploadedFiles([]);
-      }, 3000);
+          }, 3000);
           
     } catch (error: any) {
       setIsUploading(false);
@@ -516,6 +524,18 @@ export default function Upload() {
                 </motion.div>
               )}
             </AnimatePresence>
+            
+            {/* Bank Statement Viewer */}
+            {parsedBankStatement && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="mt-8"
+              >
+                <BankStatementViewer parsedStatement={parsedBankStatement} />
+              </motion.div>
+            )}
         </div>
       </div>
     </div>

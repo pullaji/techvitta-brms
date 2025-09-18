@@ -32,13 +32,23 @@ export interface User {
 
 export interface Transaction {
   id: string;
-  amount: number;
-  transaction_type: 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other';
+  // Bank Statement Columns (from your image)
+  date: string;
+  payment_type: string;
+  transaction_name: string;
+  description?: string;
   category: string;
-  status: 'pending' | 'processed' | 'failed' | 'archived';
+  
+  // Separate Credit and Debit columns as requested
+  credit_amount: number;  // Positive amounts go here
+  debit_amount: number;   // Negative amounts go here
+  
+  proof?: string;
+  
+  // System fields
   notes?: string;
-  transaction_date: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Upload {

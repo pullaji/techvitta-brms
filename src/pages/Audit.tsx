@@ -132,12 +132,12 @@ export default function Audit() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 sm:mb-8"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="heading-xl text-4xl mb-2">Audit Log</h1>
-              <p className="text-muted-foreground">
+            <div className="mb-4 sm:mb-0">
+              <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Audit Log</h1>
+              <p className="text-muted-foreground text-sm sm:text-base">
                 Track all system activities and user actions
               </p>
             </div>
@@ -145,15 +145,17 @@ export default function Audit() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.2 }}
-              className="flex space-x-3 mt-4 sm:mt-0"
+              className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4 sm:mt-0"
             >
-              <Button variant="outline" onClick={handleExportLogs} disabled={!auditLogs.length}>
+              <Button variant="outline" onClick={handleExportLogs} disabled={!auditLogs.length} className="w-full sm:w-auto">
                 <Download className="w-4 h-4 mr-2" />
-                Export Log
+                <span className="hidden sm:inline">Export Log</span>
+                <span className="sm:hidden">Export</span>
               </Button>
-              <Button className="btn-gradient">
+              <Button className="btn-gradient w-full sm:w-auto">
                 <Activity className="w-4 h-4 mr-2" />
-                View Real-time
+                <span className="hidden sm:inline">View Real-time</span>
+                <span className="sm:hidden">Live View</span>
               </Button>
             </motion.div>
           </div>

@@ -40,18 +40,6 @@ const getTypeIcon = (type: string) => {
   }
 };
 
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "processed":
-      return "bg-success-light text-success border-success/20";
-    case "pending":
-      return "bg-warning-light text-warning border-warning/20";
-    case "failed":
-      return "bg-destructive-light text-destructive border-destructive/20";
-    default:
-      return "bg-secondary text-secondary-foreground";
-  }
-};
 
 export default function Transactions() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -66,7 +54,11 @@ export default function Transactions() {
     date: "",
     category: "",
     type: "",
-    status: "pending"
+    description: "",
+    transaction_name: "",
+    credit_amount: "",
+    debit_amount: "",
+    proof: "",
   });
 
   const queryClient = useQueryClient();
@@ -88,7 +80,11 @@ export default function Transactions() {
         date: "",
         category: "",
         type: "",
-        status: "pending"
+        description: "",
+        transaction_name: "",
+        credit_amount: "",
+        debit_amount: "",
+        proof: "",
       });
     },
     onError: (error: any) => {
@@ -118,7 +114,11 @@ export default function Transactions() {
         date: "",
         category: "",
         type: "",
-        status: "pending"
+        description: "",
+        transaction_name: "",
+        credit_amount: "",
+        debit_amount: "",
+        proof: "",
       });
     },
     onError: (error: any) => {
@@ -174,11 +174,15 @@ export default function Transactions() {
     setSelectedTransaction(transaction);
     setFormData({
       notes: transaction.notes || "",
-      amount: transaction.amount.toString(),
-      date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().split('T')[0] : "",
+      amount: (transaction.credit_amount > 0 ? transaction.credit_amount : transaction.debit_amount).toString(),
+      date: transaction.date ? new Date(transaction.date).toISOString().split('T')[0] : "",
       category: transaction.category || "",
-      type: transaction.transaction_type || "",
-      status: transaction.status || "pending"
+      type: transaction.payment_type || "",
+      description: transaction.description || "",
+      transaction_name: transaction.transaction_name || "",
+      credit_amount: transaction.credit_amount ? transaction.credit_amount.toString() : "",
+      debit_amount: transaction.debit_amount ? transaction.debit_amount.toString() : "",
+      proof: transaction.proof || "",
     });
     setIsEditModalOpen(true);
   };
@@ -195,13 +199,20 @@ export default function Transactions() {
       return;
     }
 
+    const creditAmount = parseFloat(formData.credit_amount) || 0;
+    const debitAmount = parseFloat(formData.debit_amount) || 0;
+    
     const transactionData = {
-      amount: parseFloat(formData.amount),
-      transaction_type: formData.type as 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other',
+      payment_type: formData.type as 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other',
+      transaction_name: formData.transaction_name || formData.notes || 'Manual transaction',
+      description: formData.description || formData.notes || 'Manual transaction',
       category: formData.category,
-      status: formData.status as 'pending' | 'processed' | 'failed' | 'archived',
+      credit_amount: creditAmount,
+      debit_amount: debitAmount,
+      proof: formData.proof || '',
       notes: formData.notes,
-      transaction_date: formData.date,
+      date: formData.date,
+      updated_at: new Date().toISOString(),
     };
 
     if (selectedTransaction) {
@@ -233,7 +244,7 @@ export default function Transactions() {
   }) || [];
 
   const categories = [...new Set(transactions?.map(t => t.category) || [])];
-  const types = [...new Set(transactions?.map(t => t.transaction_type) || [])];
+  const types = [...new Set(transactions?.map(t => t.payment_type) || [])];
 
   if (isLoading) {
     return (
@@ -265,12 +276,12 @@ export default function Transactions() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 sm:mb-8"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="heading-xl text-4xl mb-2">Transactions</h1>
-              <p className="text-muted-foreground">
+            <div className="mb-4 sm:mb-0">
+              <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Transactions</h1>
+              <p className="text-muted-foreground text-sm sm:text-base">
                 Manage and track all your financial transactions
               </p>
             </div>
@@ -278,15 +289,52 @@ export default function Transactions() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.2 }}
-              className="flex space-x-3 mt-4 sm:mt-0"
+              className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4 sm:mt-0"
             >
-              <Button variant="outline">
+              <Button variant="outline" className="w-full sm:w-auto">
                 <Download className="w-4 h-4 mr-2" />
-                Export
+                <span className="hidden sm:inline">Export</span>
+                <span className="sm:hidden">Export CSV</span>
               </Button>
-              <Button className="btn-gradient" onClick={() => setIsAddModalOpen(true)}>
+              <Button 
+                variant="secondary" 
+                className="w-full sm:w-auto"
+                onClick={async () => {
+                  try {
+                    // Create a test transaction to verify the system works
+                    await transactionsAPI.create({
+                      payment_type: 'receipt',
+                      transaction_name: 'Test transaction from uploaded file',
+                      description: 'Test transaction from uploaded file',
+                      category: 'business_expense',
+                      credit_amount: 1000,
+                      debit_amount: 0,
+                      proof: 'test_receipt.pdf',
+                      notes: 'Test transaction from uploaded file',
+                      date: new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    });
+                    toast({
+                      title: "Success!",
+                      description: "Test transaction created successfully.",
+                    });
+                    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                  } catch (error: any) {
+                    toast({
+                      title: "Error",
+                      description: error.message || "Failed to create test transaction.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              >
                 <Plus className="w-4 h-4 mr-2" />
-                Add Transaction
+                Test Transaction
+              </Button>
+              <Button className="btn-gradient w-full sm:w-auto" onClick={() => setIsAddModalOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Add Transaction</span>
+                <span className="sm:hidden">Add New</span>
               </Button>
             </motion.div>
           </div>
@@ -299,8 +347,8 @@ export default function Transactions() {
           transition={{ delay: 0.1, duration: 0.5 }}
           className="mb-6"
         >
-          <Card className="card-elevated p-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="card-elevated p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {/* Search */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -308,7 +356,7 @@ export default function Transactions() {
                   placeholder="Search transactions..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 text-sm"
                 />
               </div>
 
@@ -367,16 +415,18 @@ export default function Transactions() {
                 <thead>
                   <tr className="border-b border-border bg-secondary/30">
                     <th className="text-left p-4 font-medium text-sm">Date</th>
+                    <th className="text-left p-4 font-medium text-sm">Payment Type</th>
+                    <th className="text-left p-4 font-medium text-sm">Transaction Name</th>
                     <th className="text-left p-4 font-medium text-sm">Description</th>
                     <th className="text-left p-4 font-medium text-sm">Category</th>
-                    <th className="text-left p-4 font-medium text-sm">Amount</th>
-                    <th className="text-left p-4 font-medium text-sm">Status</th>
-                    <th className="text-left p-4 font-medium text-sm">Actions</th>
+                    <th className="text-right p-4 font-medium text-sm">Credit (+₹)</th>
+                    <th className="text-right p-4 font-medium text-sm">Debit (-₹)</th>
+                    <th className="text-left p-4 font-medium text-sm">Proof</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredTransactions.map((transaction: any, index: number) => {
-                    const TypeIcon = getTypeIcon(transaction.transaction_type);
+                    const TypeIcon = getTypeIcon(transaction.payment_type);
                     return (
                       <motion.tr
                         key={transaction.id}
@@ -387,19 +437,27 @@ export default function Transactions() {
                       >
                         <td className="p-4">
                           <div className="text-sm text-muted-foreground">
-                            {new Date(transaction.transaction_date).toLocaleDateString()}
+                            {new Date(transaction.date).toLocaleDateString()}
                           </div>
                         </td>
                         <td className="p-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-2 bg-primary-light rounded-lg">
-                              <TypeIcon className="w-4 h-4 text-primary" />
+                          <div className="flex items-center space-x-2">
+                            <div className="p-1 bg-primary-light rounded">
+                              <TypeIcon className="w-3 h-3 text-primary" />
                             </div>
-                            <div>
-                              <div className="font-medium text-sm">
-                                {transaction.notes || 'No notes'}
-                              </div>
-                            </div>
+                            <span className="text-sm font-medium">
+                              {transaction.payment_type}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="text-sm font-medium">
+                            {transaction.transaction_name}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="text-sm">
+                            {transaction.description || transaction.notes || 'No description'}
                           </div>
                         </td>
                         <td className="p-4">
@@ -408,36 +466,33 @@ export default function Transactions() {
                           </Badge>
                         </td>
                         <td className="p-4">
-                          <div className="font-semibold">
-                            ₹{transaction.amount.toLocaleString()}
+                          <div className="font-semibold text-right text-green-600">
+                            {(transaction.credit_amount && transaction.credit_amount > 0) ? 
+                              `+₹${transaction.credit_amount.toLocaleString()}` : 
+                              (transaction.amount && transaction.amount > 0) ? 
+                                `+₹${transaction.amount.toLocaleString()}` : 
+                                '-'
+                            }
                           </div>
                         </td>
                         <td className="p-4">
-                          <Badge className={`text-xs ${getStatusColor(transaction.status)}`}>
-                            {transaction.status}
-                          </Badge>
+                          <div className="font-semibold text-right text-red-600">
+                            {(transaction.debit_amount && transaction.debit_amount > 0) ? 
+                              `-₹${transaction.debit_amount.toLocaleString()}` : 
+                              (transaction.amount && transaction.amount < 0) ? 
+                                `-₹${Math.abs(transaction.amount).toLocaleString()}` : 
+                                '-'
+                            }
+                          </div>
                         </td>
                         <td className="p-4">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreHorizontal className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEditTransaction(transaction)}>
-                                <Edit className="w-4 h-4 mr-2" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => handleDeleteTransaction(transaction.id)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <div className="text-xs text-muted-foreground">
+                            {transaction.proof ? (
+                              <a href="#" className="text-primary hover:underline">
+                                {transaction.proof}
+                              </a>
+                            ) : 'No proof'}
+                          </div>
                         </td>
                       </motion.tr>
                     );
@@ -451,7 +506,7 @@ export default function Transactions() {
         {/* Transactions Cards - Mobile */}
         <div className="md:hidden space-y-4">
           {filteredTransactions.map((transaction: any, index: number) => {
-            const TypeIcon = getTypeIcon(transaction.transaction_type);
+            const TypeIcon = getTypeIcon(transaction.payment_type);
             return (
               <motion.div
                 key={transaction.id}
@@ -470,7 +525,7 @@ export default function Transactions() {
                           {transaction.notes || 'No notes'}
                         </h3>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(transaction.transaction_date).toLocaleDateString()}
+                          {new Date(transaction.date).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
@@ -500,9 +555,6 @@ export default function Transactions() {
                     <div className="flex items-center space-x-2">
                       <Badge variant="secondary" className="text-xs">
                         {transaction.category}
-                      </Badge>
-                      <Badge className={`text-xs ${getStatusColor(transaction.status)}`}>
-                        {transaction.status}
                       </Badge>
                     </div>
                     <div className="font-semibold text-lg">
@@ -615,20 +667,6 @@ export default function Transactions() {
                       <SelectItem value="upi">UPI</SelectItem>
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="processed">Processed</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -745,20 +783,6 @@ export default function Transactions() {
                       <SelectItem value="upi">UPI</SelectItem>
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-status">Status</Label>
-                  <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="processed">Processed</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

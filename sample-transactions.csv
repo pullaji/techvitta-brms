@@ -1,0 +1,7 @@
+date,amount,description,category
+2024-01-15,2500.00,Office supplies purchase,business_expense
+2024-01-16,150.00,Lunch meeting,meals
+2024-01-17,500.00,Software subscription,software
+2024-01-18,1200.00,Travel expenses,travel
+2024-01-19,300.00,Utilities bill,utility
+2024-01-20,750.00,Invalid category test,invalid_category

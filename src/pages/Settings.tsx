@@ -86,6 +86,32 @@ export default function Settings() {
     });
   };
 
+  const handlePreferenceChange = async (key: string, value: boolean) => {
+    setPreferences(prev => ({ ...prev, [key]: value }));
+    
+    // Show immediate feedback
+    toast({
+      title: "Preference updated",
+      description: `${key === 'emailNotifications' ? 'Email notifications' : 
+                   key === 'autoBackup' ? 'Automatic backup' : 
+                   'Dark mode'} ${value ? 'enabled' : 'disabled'}`,
+    });
+
+    // Simulate saving to backend
+    try {
+      // Here you would normally save to your backend
+      console.log('Saving preference:', key, value);
+    } catch (error) {
+      // Revert on error
+      setPreferences(prev => ({ ...prev, [key]: !value }));
+      toast({
+        title: "Error",
+        description: "Failed to save preference. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient">
       <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -94,15 +120,15 @@ export default function Settings() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 sm:mb-8"
         >
-          <h1 className="heading-xl text-4xl mb-2">Settings</h1>
-          <p className="text-muted-foreground">
+          <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Settings</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">
             Manage your account settings, security, and preferences
           </p>
         </motion.div>
 
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {/* Account Information */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -268,26 +294,26 @@ export default function Settings() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.5 }}
           >
-            <Card className="card-elevated p-6">
-              <div className="flex items-center space-x-3 mb-6">
+            <Card className="card-elevated p-4 sm:p-6">
+              <div className="flex items-center space-x-3 mb-4 sm:mb-6">
                 <div className="p-2 bg-purple-50 rounded-lg">
                   <SettingsIcon className="w-5 h-5 text-purple-600" />
                 </div>
-                <h2 className="heading-md text-xl">Preferences</h2>
+                <h2 className="heading-md text-lg sm:text-xl">Preferences</h2>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium">Email Notifications</h3>
-                    <p className="text-sm text-muted-foreground">
+                  <div className="flex-1 min-w-0 mr-4">
+                    <h3 className="font-medium text-sm sm:text-base">Email Notifications</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                       Receive email updates about uploads and reports
                     </p>
                   </div>
                   <Switch
                     checked={preferences.emailNotifications}
                     onCheckedChange={(checked) => 
-                      setPreferences(prev => ({ ...prev, emailNotifications: checked }))
+                      handlePreferenceChange('emailNotifications', checked)
                     }
                   />
                 </div>
@@ -295,16 +321,16 @@ export default function Settings() {
                 <Separator />
 
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium">Automatic Backup</h3>
-                    <p className="text-sm text-muted-foreground">
+                  <div className="flex-1 min-w-0 mr-4">
+                    <h3 className="font-medium text-sm sm:text-base">Automatic Backup</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                       Automatically backup your data weekly
                     </p>
                   </div>
                   <Switch
                     checked={preferences.autoBackup}
                     onCheckedChange={(checked) => 
-                      setPreferences(prev => ({ ...prev, autoBackup: checked }))
+                      handlePreferenceChange('autoBackup', checked)
                     }
                   />
                 </div>
@@ -312,16 +338,16 @@ export default function Settings() {
                 <Separator />
 
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium">Dark Mode</h3>
-                    <p className="text-sm text-muted-foreground">
+                  <div className="flex-1 min-w-0 mr-4">
+                    <h3 className="font-medium text-sm sm:text-base">Dark Mode</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                       Use dark theme across the application
                     </p>
                   </div>
                   <Switch
                     checked={preferences.darkMode}
                     onCheckedChange={(checked) => 
-                      setPreferences(prev => ({ ...prev, darkMode: checked }))
+                      handlePreferenceChange('darkMode', checked)
                     }
                   />
                 </div>
