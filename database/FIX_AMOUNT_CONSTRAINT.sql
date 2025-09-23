@@ -86,8 +86,9 @@ SET description = 'Transaction' WHERE description IS NULL;
 UPDATE transactions 
 SET category = 'business_expense' WHERE category IS NULL;
 
-UPDATE transactions 
-SET proof = 'No proof' WHERE proof IS NULL;
+-- Don't set dummy proof values - leave as NULL for real data
+-- UPDATE transactions 
+-- SET proof = 'No proof' WHERE proof IS NULL;
 
 UPDATE transactions 
 SET notes = 'Migrated from old schema' WHERE notes IS NULL;

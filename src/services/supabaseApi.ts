@@ -661,7 +661,7 @@ export const uploadAPI = {
             category: normalizedCategory,
             credit_amount: transactionData.amount > 0 ? transactionData.amount : 0,
             debit_amount: transactionData.amount < 0 ? Math.abs(transactionData.amount) : 0,
-            proof: file.name,
+            proof: file.name || null,
             notes: `Uploaded from: ${file.name}`,
             updated_at: new Date().toISOString(),
           };
