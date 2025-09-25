@@ -13,8 +13,6 @@ import {
   Image,
   FileText,
   FileSpreadsheet,
-  TrendingUp,
-  TrendingDown,
   AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,7 +28,7 @@ import { InlineProofUpload } from "@/components/InlineProofUpload";
 import { SpendingChart } from "@/components/SpendingChart";
 import { transactionsAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
-import { exportToCSV, exportSummaryReport, generateSummaryReport } from "@/utils/exportUtils";
+import { exportToCSV } from "@/utils/exportUtils";
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -154,24 +152,6 @@ export default function Transactions() {
     });
   };
 
-  const handleExportSummary = () => {
-    if (!transactions || transactions.length === 0) {
-      toast({
-        title: "No data to export",
-        description: "Please ensure there are transactions to export.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const filename = `transaction_summary_${new Date().toISOString().split('T')[0]}.csv`;
-    exportSummaryReport(transactions, filename);
-    
-    toast({
-      title: "Summary exported!",
-      description: `Transaction summary exported to ${filename}`,
-    });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,15 +316,6 @@ export default function Transactions() {
                   <span className="hidden sm:inline">Export CSV</span>
                   <span className="sm:hidden">CSV</span>
                 </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full sm:w-auto text-sm"
-                  onClick={handleExportSummary}
-                >
-                  <TrendingUp className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Summary</span>
-                  <span className="sm:hidden">Summary</span>
-                </Button>
               </div>
               <Button className="btn-gradient w-full sm:w-auto text-sm" onClick={() => setIsAddModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -448,28 +419,8 @@ export default function Transactions() {
 
               </div>
 
-              {/* Sort Order and Clear Filters */}
-              <div className="flex justify-between items-center">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-muted-foreground">Sort Order:</span>
-                  <Button
-                    variant={sortOrder === 'desc' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSortOrder('desc')}
-                  >
-                    <TrendingDown className="w-4 h-4 mr-1" />
-                    Desc
-                  </Button>
-                  <Button
-                    variant={sortOrder === 'asc' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSortOrder('asc')}
-                  >
-                    <TrendingUp className="w-4 h-4 mr-1" />
-                    Asc
-                  </Button>
-                </div>
-                
+              {/* Clear Filters */}
+              <div className="flex justify-end items-center">
                 <Button
                   variant="outline"
                   size="sm"
