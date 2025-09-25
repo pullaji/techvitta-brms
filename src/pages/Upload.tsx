@@ -53,8 +53,9 @@ export default function Upload() {
         setParsedBankStatement(data.parsedStatement);
       }
       
-      // Invalidate transactions query to refresh the transactions list
+      // Invalidate all transactions queries to refresh the transactions list
         queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['all-transactions'] });
       
       // Show success message with more details
       const transactionCount = data.extracted_transactions_count || 0;

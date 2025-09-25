@@ -12,6 +12,7 @@ export interface MappedTransaction {
   balance?: number;
   account_no?: string;
   reference_id?: string;
+  payment_type?: string;
   confidence: number;
 }
 
@@ -86,6 +87,20 @@ class ExcelColumnMapper {
     "total": "amount",
     "transaction_amount": "amount",
     "amt": "amount",
+    
+    // Customer columns (for auto-description generation)
+    "customer": "customer",
+    "customer name": "customer",
+    "name": "customer",
+    "client": "customer",
+    "party": "customer",
+    
+    // Payment method columns
+    "payment method": "payment_method",
+    "payment_method": "payment_method",
+    "method": "payment_method",
+    "payment_type": "payment_method",
+    "mode": "payment_method",
     
     // Additional fields
     "account": "account_no",
@@ -219,6 +234,10 @@ class ExcelColumnMapper {
     const accountIndex = this.findColumnIndex('account_no', headers, columnMapping);
     const referenceIndex = this.findColumnIndex('reference_id', headers, columnMapping);
     
+    // Find customer and payment method columns for auto-description
+    const customerIndex = this.findColumnIndex('customer', headers, columnMapping);
+    const paymentMethodIndex = this.findColumnIndex('payment_method', headers, columnMapping);
+    
     // Validate required fields
     if (dateIndex === -1) {
       throw new Error('Date column not found');
@@ -234,7 +253,16 @@ class ExcelColumnMapper {
       throw new Error('Invalid date');
     }
     
-    const description = row[descriptionIndex] || 'Excel Import';
+    // Auto-generate description from Customer + Payment Method if no description column
+    let description = row[descriptionIndex];
+    if (!description && customerIndex !== -1 && paymentMethodIndex !== -1) {
+      const customer = row[customerIndex] || 'Unknown';
+      const paymentMethod = row[paymentMethodIndex] || 'Unknown';
+      description = `${customer} - ${paymentMethod} payment`;
+      console.log(`✅ Auto-generated description: "${description}"`);
+    } else if (!description) {
+      description = 'Excel Import';
+    }
     
     // Determine amount and type
     let amount = 0;
@@ -245,6 +273,8 @@ class ExcelColumnMapper {
       const debitAmount = this.parseAmount(row[debitIndex]);
       const creditAmount = this.parseAmount(row[creditIndex]);
       
+      console.log(`Row ${row}: Debit=${debitAmount}, Credit=${creditAmount}`);
+      
       if (debitAmount > 0) {
         amount = debitAmount;
         type = 'debit';
@@ -252,22 +282,40 @@ class ExcelColumnMapper {
         amount = creditAmount;
         type = 'credit';
       } else {
+        console.log(`No amount data found in debit/credit columns: ${row[debitIndex]}, ${row[creditIndex]}`);
         throw new Error('No amount data found');
       }
     } else if (amountIndex !== -1) {
       // Single amount column
-      amount = Math.abs(this.parseAmount(row[amountIndex]));
-      type = this.parseAmount(row[amountIndex]) >= 0 ? 'credit' : 'debit';
+      const rawAmount = this.parseAmount(row[amountIndex]);
+      amount = Math.abs(rawAmount);
+      type = rawAmount >= 0 ? 'credit' : 'debit';
+      console.log(`Row ${row}: Single amount=${rawAmount}, processed=${amount}, type=${type}`);
     }
     
+    // Allow zero amounts for balance entries or informational rows
     if (amount === 0) {
-      throw new Error('Amount is zero');
+      console.log(`⚠️ Row has zero amount - skipping as it may be a balance entry or informational row`);
+      return null;
     }
     
     // Optional fields
     const balance = balanceIndex !== -1 ? this.parseAmount(row[balanceIndex]) : undefined;
     const account_no = accountIndex !== -1 ? row[accountIndex]?.toString() : undefined;
     const reference_id = referenceIndex !== -1 ? row[referenceIndex]?.toString() : undefined;
+    
+    // Get payment method for better categorization
+    const paymentMethod = paymentMethodIndex !== -1 ? row[paymentMethodIndex]?.toString().toLowerCase() : 'unknown';
+    let paymentType = 'bank_transfer';
+    
+    // Map payment method to payment type
+    if (paymentMethod.includes('upi')) {
+      paymentType = 'upi';
+    } else if (paymentMethod.includes('cash')) {
+      paymentType = 'cash';
+    } else if (paymentMethod.includes('credit card')) {
+      paymentType = 'credit_card';
+    }
     
     return {
       date,
@@ -277,6 +325,7 @@ class ExcelColumnMapper {
       balance,
       account_no,
       reference_id,
+      payment_type: paymentType,
       confidence: 0.95
     };
   }
@@ -308,6 +357,11 @@ class ExcelColumnMapper {
   // Parse amount from various formats
   private parseAmount(amountValue: any): number {
     if (!amountValue) return 0;
+    
+    // Handle different data types
+    if (typeof amountValue === 'number') {
+      return isNaN(amountValue) ? 0 : amountValue;
+    }
     
     const amountStr = String(amountValue).replace(/[₹,$,\s]/g, '');
     const amount = parseFloat(amountStr);

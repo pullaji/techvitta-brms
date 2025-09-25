@@ -42,6 +42,11 @@ export interface Transaction {
   // Separate Credit and Debit columns as requested
   credit_amount: number;  // Positive amounts go here
   debit_amount: number;   // Negative amounts go here
+  balance?: number;       // Running balance after transaction
+  
+  // File processing fields
+  source_file?: string;   // Original file name
+  source_type?: string;   // File type (pdf, excel, csv, etc.)
   
   proof?: string;
   

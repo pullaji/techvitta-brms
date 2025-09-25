@@ -13,7 +13,8 @@ import {
   Image,
   FileText,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,15 @@ export default function Transactions() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Refresh transactions function
+  const refreshTransactions = () => {
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    toast({
+      title: "Refreshing...",
+      description: "Transactions are being refreshed.",
+    });
+  };
 
   // Create transaction mutation
   const createTransactionMutation = useMutation({
@@ -196,11 +206,8 @@ export default function Transactions() {
 
   // Fetch transactions from Supabase
   const { data: transactions, isLoading, error } = useQuery({
-    queryKey: ['transactions', { category: categoryFilter, type: typeFilter }],
-    queryFn: () => transactionsAPI.getAll({
-      category: categoryFilter === "all" ? undefined : categoryFilter,
-      transaction_type: typeFilter === "all" ? undefined : typeFilter,
-    }),
+    queryKey: ['transactions'],
+    queryFn: () => transactionsAPI.getAll({}),
   });
 
   const filteredTransactions = transactions?.filter((transaction) => {
@@ -307,6 +314,15 @@ export default function Transactions() {
               className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4 sm:mt-0"
             >
               <div className="flex space-x-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full sm:w-auto text-sm"
+                  onClick={refreshTransactions}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Refresh</span>
+                  <span className="sm:hidden">Refresh</span>
+                </Button>
                 <Button 
                   variant="outline" 
                   className="w-full sm:w-auto text-sm"
@@ -465,6 +481,15 @@ export default function Transactions() {
                   ₹{filteredTransactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0).toLocaleString('en-IN')}
                 </p>
               </div>
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground">Current Balance</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {filteredTransactions.length > 0 && filteredTransactions[filteredTransactions.length - 1]?.balance ? 
+                    `₹${filteredTransactions[filteredTransactions.length - 1].balance.toLocaleString('en-IN')}` : 
+                    '₹0'
+                  }
+                </p>
+              </div>
             </div>
             
           </Card>
@@ -513,6 +538,8 @@ export default function Transactions() {
                     <th className="text-left p-4 font-medium text-sm">Category</th>
                     <th className="text-right p-4 font-medium text-sm">Credit (+₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Debit (-₹)</th>
+                    <th className="text-right p-4 font-medium text-sm">Balance (₹)</th>
+                    <th className="text-left p-4 font-medium text-sm">Source</th>
                     <th className="text-left p-4 font-medium text-sm">Proof</th>
                   </tr>
                 </thead>
@@ -574,6 +601,28 @@ export default function Transactions() {
                           </div>
                         </td>
                         <td className="p-4">
+                          <div className="font-semibold text-right text-blue-600">
+                            {transaction.balance ? 
+                              `₹${transaction.balance.toLocaleString()}` : 
+                              '-'
+                            }
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="text-xs text-muted-foreground">
+                            {transaction.source_file ? (
+                              <div className="flex items-center space-x-1">
+                                <FileSpreadsheet className="w-3 h-3" />
+                                <span className="truncate max-w-20" title={transaction.source_file}>
+                                  {transaction.source_file}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">Manual</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
                           <div className="text-xs">
                             <InlineProofUpload
                               transactionId={transaction.id}
@@ -631,6 +680,11 @@ export default function Transactions() {
                             <span className="text-muted-foreground">₹0</span>
                         }
                       </div>
+                      {transaction.balance && (
+                        <div className="text-sm text-blue-600 font-medium mt-1">
+                          Balance: ₹{transaction.balance.toLocaleString()}
+                        </div>
+                      )}
                     </div>
                   </div>
                   
@@ -654,6 +708,16 @@ export default function Transactions() {
                       </Badge>
                     </div>
                   </div>
+                  
+                  {/* Source File */}
+                  {transaction.source_file && (
+                    <div className="mb-3">
+                      <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                        <FileSpreadsheet className="w-3 h-3" />
+                        <span>Source: {transaction.source_file}</span>
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Proof section */}
                   <div className="pt-3 border-t border-border/30">

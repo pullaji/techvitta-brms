@@ -156,7 +156,9 @@ export const transactionsAPI = {
     // Add amount field if it exists in the database (for backward compatibility)
     const transactionData = {
       ...transaction,
-      amount: (transaction.credit_amount || 0) - (transaction.debit_amount || 0)
+      amount: (transaction.credit_amount || 0) - (transaction.debit_amount || 0),
+      source_file: transaction.source_file,
+      source_type: transaction.source_type
     };
     
     // Remove fields that might not exist in the database yet
@@ -168,6 +170,9 @@ export const transactionsAPI = {
       category: transactionData.category,
       credit_amount: transactionData.credit_amount,
       debit_amount: transactionData.debit_amount,
+      balance: transactionData.balance,
+      source_file: transactionData.source_file,
+      source_type: transactionData.source_type,
       proof: transactionData.proof,
       notes: transactionData.notes,
       updated_at: transactionData.updated_at
@@ -656,7 +661,7 @@ export const uploadAPI = {
           debit_amount: tx.type === 'debit' ? tx.amount : 0,
           balance: tx.balance,
           category: detectCategory(tx.description),
-          payment_type: 'bank_transfer',
+          payment_type: tx.payment_type || 'bank_transfer',
           transaction_name: tx.description,
           source_file: file.name,
           source_type: 'excel',
@@ -684,6 +689,7 @@ export const uploadAPI = {
       // Update upload record with processing status (if upload record exists)
       if (uploadRecord) {
         try {
+          // Try with all fields first
           await supabase
             .from('uploads')
             .update({
@@ -691,15 +697,25 @@ export const uploadAPI = {
               extracted_transactions_count: parsedTransactions.length
             })
             .eq('id', uploadRecord.id);
-        } catch (error) {
+        } catch (error: any) {
+          console.log('Full upload update failed, trying fallback:', error.message);
           // Fallback: try without optional fields
           try {
             await supabase
               .from('uploads')
               .update({ status: 'processing' })
               .eq('id', uploadRecord.id);
-          } catch (fallbackError) {
-            console.log('Could not update upload status');
+          } catch (fallbackError: any) {
+            console.log('Fallback upload update failed:', fallbackError.message);
+            // Final fallback: try with minimal fields
+            try {
+              await supabase
+                .from('uploads')
+                .update({ status: 'processing' })
+                .eq('id', uploadRecord.id);
+            } catch (finalError: any) {
+              console.log('All upload update attempts failed:', finalError.message);
+            }
           }
         }
       }
@@ -755,6 +771,7 @@ export const uploadAPI = {
       // Update upload record with final processing status (if upload record exists)
       if (uploadRecord) {
         try {
+          // Try with all fields first
           await supabase
             .from('uploads')
             .update({
@@ -764,17 +781,30 @@ export const uploadAPI = {
               processing_error: successCount === 0 ? 'No transactions could be created' : null
             })
             .eq('id', uploadRecord.id);
-        } catch (error) {
+        } catch (error: any) {
+          console.log('Full final upload update failed, trying fallback:', error.message);
           // Fallback: try without optional fields
           try {
             await supabase
               .from('uploads')
               .update({
-                status: successCount > 0 ? 'processed' : 'failed'
+                status: successCount > 0 ? 'processed' : 'failed',
+                extracted_transactions_count: successCount
               })
               .eq('id', uploadRecord.id);
-          } catch (fallbackError) {
-            console.log('Could not update final upload status');
+          } catch (fallbackError: any) {
+            console.log('Fallback final upload update failed:', fallbackError.message);
+            // Final fallback: try with minimal fields
+            try {
+              await supabase
+                .from('uploads')
+                .update({
+                  status: successCount > 0 ? 'processed' : 'failed'
+                })
+                .eq('id', uploadRecord.id);
+            } catch (finalError: any) {
+              console.log('All final upload update attempts failed:', finalError.message);
+            }
           }
         }
       }
@@ -827,6 +857,7 @@ export const uploadAPI = {
         // Update upload record with fallback processing status (if upload record exists)
         if (uploadRecord) {
           try {
+            // Try with all fields first
             await supabase
               .from('uploads')
               .update({
@@ -836,15 +867,28 @@ export const uploadAPI = {
                 processing_error: 'Used fallback processing due to parsing error'
               })
               .eq('id', uploadRecord.id);
-          } catch (error) {
+          } catch (error: any) {
+            console.log('Full fallback upload update failed, trying fallback:', error.message);
             // Fallback: try without optional fields
             try {
               await supabase
                 .from('uploads')
-                .update({ status: 'processed' })
+                .update({
+                  status: 'processed',
+                  extracted_transactions_count: 1
+                })
                 .eq('id', uploadRecord.id);
-            } catch (fallbackError) {
-              console.log('Could not update fallback upload status');
+            } catch (fallbackError: any) {
+              console.log('Fallback fallback upload update failed:', fallbackError.message);
+              // Final fallback: try with minimal fields
+              try {
+                await supabase
+                  .from('uploads')
+                  .update({ status: 'processed' })
+                  .eq('id', uploadRecord.id);
+              } catch (finalError: any) {
+                console.log('All fallback upload update attempts failed:', finalError.message);
+              }
             }
           }
         }
@@ -856,6 +900,7 @@ export const uploadAPI = {
         // Update upload record with failed status (if upload record exists)
         if (uploadRecord) {
           try {
+            // Try with all fields first
             await supabase
               .from('uploads')
               .update({
@@ -865,15 +910,28 @@ export const uploadAPI = {
                 processing_error: `Processing failed: ${fallbackError.message || 'Unknown error'}`
               })
               .eq('id', uploadRecord.id);
-          } catch (error) {
+          } catch (error: any) {
+            console.log('Full failed upload update failed, trying fallback:', error.message);
             // Fallback: try without optional fields
             try {
               await supabase
                 .from('uploads')
-                .update({ status: 'failed' })
+                .update({
+                  status: 'failed',
+                  extracted_transactions_count: 0
+                })
                 .eq('id', uploadRecord.id);
-            } catch (fallbackError) {
-              console.log('Could not update failed upload status');
+            } catch (fallbackError: any) {
+              console.log('Fallback failed upload update failed:', fallbackError.message);
+              // Final fallback: try with minimal fields
+              try {
+                await supabase
+                  .from('uploads')
+                  .update({ status: 'failed' })
+                  .eq('id', uploadRecord.id);
+              } catch (finalError: any) {
+                console.log('All failed upload update attempts failed:', finalError.message);
+              }
             }
           }
         }
