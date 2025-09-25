@@ -10,7 +10,10 @@ import {
   X,
   Check,
   AlertCircle,
-  FileImage
+  FileImage,
+  FileSpreadsheet,
+  Download,
+  Settings
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +23,8 @@ import { useToast } from "@/hooks/use-toast";
 import { uploadAPI, transactionsAPI } from "@/services/supabaseApi";
 import { BankStatementViewer } from "@/components/BankStatementViewer";
 import { ParsedBankStatement } from "@/services/pdfParser";
+import { ExcelDebugger } from "@/components/ExcelDebugger";
+import { ExcelTemplateDownloader } from "@/components/ExcelTemplateDownloader";
 
 
 export default function Upload() {
@@ -29,6 +34,9 @@ export default function Upload() {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const [parsedBankStatement, setParsedBankStatement] = useState<ParsedBankStatement | null>(null);
+  const [selectedExcelFile, setSelectedExcelFile] = useState<File | null>(null);
+  const [showExcelDebugger, setShowExcelDebugger] = useState(false);
+  const [showExcelTemplates, setShowExcelTemplates] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -48,15 +56,32 @@ export default function Upload() {
       // Invalidate transactions query to refresh the transactions list
         queryClient.invalidateQueries({ queryKey: ['transactions'] });
       
+      // Show success message with more details
+      const transactionCount = data.extracted_transactions_count || 0;
       toast({
-        title: "File uploaded successfully!",
-        description: `${variables.file.name} has been uploaded and processed.`,
+        title: "File processed successfully!",
+        description: `${variables.file.name} uploaded and ${transactionCount} transactions extracted.`,
       });
     },
     onError: (error: any, variables) => {
+      console.error('Upload error:', error);
+      
+      // Provide more specific error messages
+      let errorMessage = error.message || 'Unknown error occurred';
+      
+      if (errorMessage.includes('File size')) {
+        errorMessage = 'File is too large. Please choose a file smaller than 10MB.';
+      } else if (errorMessage.includes('Unsupported file type')) {
+        errorMessage = 'File type not supported. Please upload PDF, Excel, CSV, or image files.';
+      } else if (errorMessage.includes('No transactions could be extracted')) {
+        errorMessage = 'No transactions found in the file. Please ensure the file contains valid bank statement data.';
+      } else if (errorMessage.includes('PDF parsing failed')) {
+        errorMessage = 'Failed to read PDF. The file might be image-based or corrupted.';
+      }
+      
       toast({
-        title: "Upload failed",
-        description: `Failed to upload ${variables.file.name}: ${error.message}`,
+        title: "Processing failed",
+        description: `${variables.file.name}: ${errorMessage}`,
         variant: "destructive",
       });
     }
@@ -112,6 +137,13 @@ export default function Upload() {
       return;
     }
 
+    // Show preview of what will be processed
+    const fileTypes = validFiles.map(f => f.name.split('.').pop()?.toUpperCase()).join(', ');
+    toast({
+      title: "Files ready for processing",
+      description: `${validFiles.length} file(s) selected (${fileTypes}). Click upload to process bank statements.`,
+    });
+
     setFiles(validFiles);
     setUploadComplete(false);
   }, [toast]);
@@ -148,6 +180,10 @@ export default function Upload() {
     setUploadProgress(0);
     setUploadedFiles([]);
 
+    let successCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
+
     try {
       // Upload files one by one
       for (let i = 0; i < files.length; i++) {
@@ -156,38 +192,61 @@ export default function Upload() {
         // Update progress
         setUploadProgress((i / files.length) * 100);
 
-        // Prepare metadata (minimal metadata for simple upload)
-        const metadata = {
-          fileType: "document",
-          category: "business_expense",
-        };
+        try {
+          // Prepare metadata (minimal metadata for simple upload)
+          const metadata = {
+            fileType: "document",
+            category: "business_expense",
+          };
 
-        // Upload file
-        await uploadMutation.mutateAsync({ file, metadata });
+          // Upload file
+          await uploadMutation.mutateAsync({ file, metadata });
+          successCount++;
+        } catch (fileError: any) {
+          errorCount++;
+          errors.push(`${file.name}: ${fileError.message || 'Processing failed'}`);
+          console.error(`Error processing ${file.name}:`, fileError);
+        }
       }
 
       // Complete upload
       setUploadProgress(100);
-          setIsUploading(false);
-          setUploadComplete(true);
-          
-          toast({
-            title: "Upload successful!",
-        description: `${files.length} file(s) uploaded and processed successfully.`,
-          });
-          
-      // Reset after 3 seconds
-          setTimeout(() => {
-            setFiles([]);
-            setUploadComplete(false);
+      setIsUploading(false);
+      setUploadComplete(true);
+      
+      // Show appropriate success/error message
+      if (successCount > 0 && errorCount === 0) {
+        toast({
+          title: "Upload successful!",
+          description: `${successCount} file(s) uploaded and processed successfully.`,
+        });
+      } else if (successCount > 0 && errorCount > 0) {
+        toast({
+          title: "Partial success",
+          description: `${successCount} file(s) processed successfully, ${errorCount} failed.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Upload failed",
+          description: "All files failed to process. Please check the file formats and try again.",
+          variant: "destructive",
+        });
+      }
+      
+      // Reset after 5 seconds
+      setTimeout(() => {
+        setFiles([]);
+        setUploadComplete(false);
         setUploadedFiles([]);
-          }, 3000);
+      }, 5000);
           
     } catch (error: any) {
       setIsUploading(false);
+      console.error('Upload process error:', error);
       toast({
         title: "Upload failed",
-        description: error.message || "An error occurred during upload.",
+        description: error.message || "An unexpected error occurred during upload.",
         variant: "destructive",
       });
     }
@@ -280,9 +339,20 @@ export default function Upload() {
                       ))}
                     </div>
                     
-                    <p className="text-xs sm:text-sm text-muted-foreground">
+                    <p className="text-xs sm:text-sm text-muted-foreground mb-4">
                       Max 10MB per file • Up to 5 files
                     </p>
+                    
+                    {/* Excel Template Download Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowExcelTemplates(true)}
+                      className="text-xs"
+                    >
+                      <Download className="w-3 h-3 mr-1" />
+                      Download Excel Template
+                    </Button>
                   </div>
                 </div>
               </Card>
@@ -320,6 +390,26 @@ export default function Upload() {
                           }
                         };
                         
+                        const getProcessingInfo = () => {
+                          switch (fileExtension) {
+                            case 'pdf':
+                              return { type: 'Bank Statement', description: 'Will extract transactions using PDF parsing' };
+                            case 'csv':
+                              return { type: 'CSV Data', description: 'Will parse transaction data from CSV columns' };
+                            case 'xlsx':
+                            case 'xls':
+                              return { type: 'Excel Data', description: 'Will extract transactions from Excel sheets' };
+                            case 'jpg':
+                            case 'jpeg':
+                            case 'png':
+                              return { type: 'Image', description: 'Will use OCR to extract transaction data' };
+                            default:
+                              return { type: 'Document', description: 'Will process as document' };
+                          }
+                        };
+
+                        const processingInfo = getProcessingInfo();
+
                         return (
                         <motion.div
                           key={index}
@@ -341,11 +431,35 @@ export default function Upload() {
                               <p className="text-xs text-muted-foreground">
                                 {(file.size / 1024 / 1024).toFixed(2)} MB
                               </p>
-                                <div className="mt-1">
+                                <div className="mt-1 flex items-center space-x-2">
                                   <Badge variant="outline" className="text-xs">
                                     {fileExtension?.toUpperCase()}
                                   </Badge>
-                            </div>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {processingInfo.type}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {processingInfo.description}
+                                </p>
+                                
+                                {/* Excel-specific actions */}
+                                {(fileExtension === 'xlsx' || fileExtension === 'xls') && (
+                                  <div className="mt-2 flex space-x-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedExcelFile(file);
+                                        setShowExcelDebugger(true);
+                                      }}
+                                      className="text-xs h-6 px-2"
+                                    >
+                                      <Settings className="w-3 h-3 mr-1" />
+                                      Analyze
+                                    </Button>
+                                  </div>
+                                )}
                           </div>
                           <Button
                             variant="ghost"
@@ -419,12 +533,16 @@ export default function Upload() {
                       <div className="flex-1">
                         <h3 className="font-semibold text-success text-lg mb-1">Upload Complete!</h3>
                         <p className="text-sm text-success/80 mb-3">
-                          Your {files.length} file{files.length > 1 ? 's have' : ' has'} been processed and added to your records.
+                          Your {files.length} file{files.length > 1 ? 's have' : ' has'} been processed and transactions extracted.
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <Badge variant="secondary" className="text-xs">Processed</Badge>
+                          <Badge variant="secondary" className="text-xs">Transactions Extracted</Badge>
                           <Badge variant="secondary" className="text-xs">Ready for Review</Badge>
                         </div>
+                        <p className="text-xs text-success/70 mt-2">
+                          Check the Transactions page to view and manage your extracted transactions.
+                        </p>
                       </div>
                     </div>
                   </Card>
@@ -525,6 +643,49 @@ export default function Upload() {
               )}
             </AnimatePresence>
             
+            {/* Excel Template Downloader */}
+            <AnimatePresence>
+              {showExcelTemplates && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">Excel Templates</h3>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShowExcelTemplates(false)}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                  <ExcelTemplateDownloader />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Excel File Debugger */}
+            <AnimatePresence>
+              {showExcelDebugger && selectedExcelFile && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <ExcelDebugger 
+                    file={selectedExcelFile} 
+                    onClose={() => {
+                      setShowExcelDebugger(false);
+                      setSelectedExcelFile(null);
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Bank Statement Viewer */}
             {parsedBankStatement && (
               <motion.div

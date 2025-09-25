@@ -1,3 +1,6 @@
+// Import PDF.js initialization
+import { initPDFJS } from '@/utils/pdfInit';
+
 // Interface for extracted transaction data
 export interface BankTransaction {
   date: string;
@@ -22,27 +25,99 @@ class PDFParserService {
     try {
       console.log('Attempting to extract text using PDF.js...');
       
-      // Temporarily disable PDF.js due to browser compatibility issues
-      console.log('PDF.js temporarily disabled due to browser compatibility issues');
-      throw new Error('PDF text extraction temporarily disabled');
+      // Initialize PDF.js
+      const pdfjs = initPDFJS();
+      
+      // Read file as array buffer
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Load the PDF document
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      
+      // Extract text from all pages
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str)
+          .join(' ');
+        fullText += pageText + '\n';
+      }
+      
+      console.log('Successfully extracted text from PDF');
+      return fullText;
       
     } catch (error) {
       console.error('Error extracting text from PDF:', error);
-      throw new Error('Failed to extract text from PDF. The PDF might be image-based.');
+      throw new Error(`PDF text extraction failed: ${error.message || 'Unknown error'}`);
     }
   }
 
   // Perform OCR on image-based PDF using Tesseract.js
   async performOCR(file: File): Promise<string> {
     try {
-      console.log('Performing OCR on PDF...');
+      console.log('Performing OCR on image-based PDF...');
       
-      // Temporarily disable OCR due to browser compatibility issues
-      console.log('OCR temporarily disabled due to browser compatibility issues');
-      throw new Error('OCR temporarily disabled');
+      // Import required libraries
+      const Tesseract = await import('tesseract.js');
+      
+      // Initialize PDF.js
+      const pdfjs = initPDFJS();
+      
+      // Read file as array buffer
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Load the PDF document
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      
+      // Process each page
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        console.log(`Processing page ${pageNum} of ${pdf.numPages}...`);
+        
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
+        
+        // Create canvas to render PDF page
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('Could not get canvas context');
+        }
+        
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        // Render PDF page to canvas
+        await page.render({
+          canvasContext: context,
+          viewport: viewport,
+          canvas: canvas
+        }).promise;
+        
+        // Convert canvas to image data URL
+        const imageDataUrl = canvas.toDataURL('image/png');
+        
+        // Perform OCR on the rendered image
+        const { data: { text } } = await Tesseract.recognize(imageDataUrl, 'eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              console.log(`Page ${pageNum} OCR Progress: ${Math.round(m.progress * 100)}%`);
+            }
+          }
+        });
+        
+        fullText += text + '\n';
+        console.log(`Page ${pageNum} OCR completed`);
+      }
+      
+      console.log('Successfully performed OCR on all PDF pages');
+      return fullText;
+      
     } catch (error) {
-      console.error('Error performing OCR:', error);
-      throw new Error('Failed to perform OCR on PDF');
+      console.error('Error performing OCR on PDF:', error);
+      throw new Error(`OCR processing failed: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -296,69 +371,70 @@ class PDFParserService {
     console.log('Starting PDF bank statement parsing...');
     
     let text = '';
+    let extractionMethod = '';
     
     try {
       // First, try to extract text directly using PDF.js
       text = await this.extractTextFromPDF(file);
-      console.log('Successfully extracted text from PDF');
+      extractionMethod = 'PDF.js text extraction';
+      console.log('Successfully extracted text from PDF using PDF.js');
       console.log('Extracted text preview:', text.substring(0, 500));
     } catch (error) {
-      console.log('PDF appears to be image-based, attempting OCR...');
-      // If direct text extraction fails, try OCR
+      console.log('PDF.js text extraction failed, attempting OCR on rendered pages...');
+      console.log('Error details:', error);
+      
+      // If direct text extraction fails, try OCR on rendered pages
       try {
         text = await this.performOCR(file);
+        extractionMethod = 'OCR on rendered pages';
         console.log('Successfully extracted text using OCR');
         console.log('OCR text preview:', text.substring(0, 500));
       } catch (ocrError) {
-        console.error('Both PDF text extraction and OCR failed:', ocrError);
+        console.error('Both PDF text extraction and OCR failed:');
+        console.error('PDF.js error:', error);
+        console.error('OCR error:', ocrError);
         
-        // Fallback to sample data if both methods fail
-        console.log('Using fallback sample data with 3 transactions');
-        const sampleStatement: ParsedBankStatement = {
-          transactions: [
-            {
-              date: '2025-05-15',
-              paymentType: 'Single Transfer',
-              transactionName: 'Malakala Venkatesh',
-              category: 'income',
-              amount: 20000,
-              isCredit: true
-            },
-            {
-              date: '2025-05-14',
-              paymentType: 'Single Transfer',
-              transactionName: 'Malakala Venkatesh',
-              category: 'income',
-              amount: 50000,
-              isCredit: true
-            },
-            {
-              date: '2025-05-14',
-              paymentType: 'UPI receipt',
-              transactionName: 'Dasari Taranga Naveen',
-              category: 'income',
-              amount: 30000,
-              isCredit: true
-            }
-          ],
-          statementPeriod: 'Upto 15 May, 2025',
-          accountNumber: 'IDFC FIRST xx 1947 89035151947',
-          bankName: 'IDFC FIRST Bank'
-        };
+        // Provide detailed error message
+        const errorMessage = `Unable to extract text from PDF. 
         
-        console.log(`Using fallback sample data with ${sampleStatement.transactions.length} transactions`);
-        return sampleStatement;
+Possible reasons:
+1. PDF is corrupted or password-protected
+2. PDF contains only images without text layer
+3. PDF format is not supported
+4. File is too large or complex
+
+Please try:
+- A different PDF file
+- Converting the PDF to images and uploading those instead
+- Ensuring the PDF is not password-protected
+- Checking that the PDF contains readable text
+
+Technical details:
+- PDF.js error: ${error.message || 'Unknown error'}
+- OCR error: ${ocrError.message || 'Unknown error'}`;
+        
+        throw new Error(errorMessage);
       }
     }
     
     if (!text || text.trim().length === 0) {
-      throw new Error('No text could be extracted from the PDF');
+      throw new Error(`No text could be extracted from the PDF using ${extractionMethod}. The PDF might be empty or contain only images without text.`);
     }
     
     console.log('Parsing bank statement text...');
     const parsedStatement = this.parseBankStatement(text);
     
-    console.log(`Successfully parsed ${parsedStatement.transactions.length} transactions`);
+    if (parsedStatement.transactions.length === 0) {
+      throw new Error(`No transactions found in the extracted text. The PDF might not contain bank statement data or the format is not recognized.
+
+Extraction method used: ${extractionMethod}
+Extracted text length: ${text.length} characters
+Text preview: ${text.substring(0, 200)}...
+
+Please ensure the PDF contains a standard bank statement format with transaction data.`);
+    }
+    
+    console.log(`Successfully parsed ${parsedStatement.transactions.length} transactions using ${extractionMethod}`);
     return parsedStatement;
   }
 }

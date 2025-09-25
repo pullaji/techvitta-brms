@@ -21,17 +21,24 @@ export function InlineProofUpload({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const isImageUrl = currentProof && (currentProof.startsWith('http') || currentProof.startsWith('/'));
+  // Only consider it a real proof if it's a valid URL or starts with '/'
+  // File names like "Output.xlsx" should be treated as empty/null
+  const isImageUrl = currentProof && 
+    (currentProof.startsWith('http') || currentProof.startsWith('/')) &&
+    !currentProof.includes('.xlsx') && 
+    !currentProof.includes('.pdf') &&
+    !currentProof.includes('Output');
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     // Validate file type
-    if (!file.type.startsWith('image/')) {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
       toast({
         title: "Invalid file type",
-        description: "Please upload an image file (JPG, PNG, GIF, etc.)",
+        description: "Please upload an image file (JPG, PNG, GIF, WebP)",
         variant: "destructive",
       });
       return;
@@ -50,24 +57,34 @@ export function InlineProofUpload({
     setIsUploading(true);
 
     try {
-      // Create a unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${transactionId}-${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+      // Create a unique filename with better naming
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const fileName = `proof_${transactionId}_${timestamp}_${randomId}.${fileExt}`;
       const filePath = `proofs/${fileName}`;
+
+      console.log('Uploading inline proof file:', { fileName, filePath, fileSize: file.size });
 
       // Upload file to Supabase Storage
       const { data, error } = await supabase.storage
         .from('uploads')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (error) {
-        throw error;
+        console.error('Storage upload error:', error);
+        throw new Error(`Upload failed: ${error.message}`);
       }
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('uploads')
         .getPublicUrl(filePath);
+
+      console.log('Inline proof uploaded successfully:', publicUrl);
 
       onUploadComplete(publicUrl);
 
@@ -76,9 +93,10 @@ export function InlineProofUpload({
         description: "Proof image uploaded successfully.",
       });
     } catch (error: any) {
+      console.error('Inline proof upload error:', error);
       toast({
         title: "Upload failed",
-        description: error.message || "Failed to upload image",
+        description: error.message || "Failed to upload image. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -126,8 +144,12 @@ export function InlineProofUpload({
             <X className="w-3 h-3" />
           </Button>
         </>
-      ) : currentProof && !isImageUrl ? (
-        // Show text proof
+      ) : currentProof && !isImageUrl && 
+           !currentProof.includes('.xlsx') && 
+           !currentProof.includes('.pdf') && 
+           !currentProof.includes('Output') &&
+           currentProof.length > 0 ? (
+        // Show text proof (only for real text, not file names)
         <div className="flex items-center space-x-1">
           <span className="text-xs text-muted-foreground truncate max-w-20">
             {currentProof}
@@ -145,7 +167,7 @@ export function InlineProofUpload({
           </Button>
         </div>
       ) : (
-        // Show upload button
+        // Show upload button with text
         <>
           <input
             ref={fileInputRef}
@@ -157,14 +179,15 @@ export function InlineProofUpload({
           />
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || isUploading}
-            className="h-6 w-6 p-0 text-primary hover:text-primary"
+            className="h-8 px-3 text-xs text-primary hover:text-primary border-primary/20 hover:border-primary/40"
             title="Upload proof image"
           >
-            <Upload className="w-3 h-3" />
+            <Upload className="w-3 h-3 mr-1" />
+            Upload the proof
           </Button>
         </>
       )}

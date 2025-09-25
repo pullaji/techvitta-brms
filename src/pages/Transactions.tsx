@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,7 +11,11 @@ import {
   Calendar,
   Tag,
   Image,
-  FileText
+  FileText,
+  FileSpreadsheet,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +27,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ProofInput } from "@/components/ProofInput";
 import { InlineProofUpload } from "@/components/InlineProofUpload";
+import { SpendingChart } from "@/components/SpendingChart";
 import { transactionsAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
+import { exportToCSV, exportSummaryReport, generateSummaryReport } from "@/utils/exportUtils";
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -44,10 +50,13 @@ export default function Transactions() {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [dateRangeFilter, setDateRangeFilter] = useState({ start: "", end: "" });
+  const [sortBy, setSortBy] = useState("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [formData, setFormData] = useState({
     notes: "",
-    amount: "",
     date: "",
     category: "",
     type: "",
@@ -73,7 +82,6 @@ export default function Transactions() {
       setIsAddModalOpen(false);
       setFormData({
         notes: "",
-        amount: "",
         date: "",
         category: "",
         type: "",
@@ -126,10 +134,49 @@ export default function Transactions() {
     }
   };
 
+  // Export functions
+  const handleExportCSV = () => {
+    if (!transactions || transactions.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "Please ensure there are transactions to export.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const filename = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
+    exportToCSV(transactions, filename);
+    
+    toast({
+      title: "Export successful!",
+      description: `Transactions exported to ${filename}`,
+    });
+  };
+
+  const handleExportSummary = () => {
+    if (!transactions || transactions.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "Please ensure there are transactions to export.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const filename = `transaction_summary_${new Date().toISOString().split('T')[0]}.csv`;
+    exportSummaryReport(transactions, filename);
+    
+    toast({
+      title: "Summary exported!",
+      description: `Transaction summary exported to ${filename}`,
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.notes || !formData.amount || !formData.date || !formData.category || !formData.type) {
+    if (!formData.notes || !formData.date || !formData.category || !formData.type) {
       toast({
         title: "Error",
         description: "Please fill in all required fields.",
@@ -140,6 +187,15 @@ export default function Transactions() {
 
     const creditAmount = parseFloat(formData.credit_amount) || 0;
     const debitAmount = parseFloat(formData.debit_amount) || 0;
+
+    if (creditAmount === 0 && debitAmount === 0) {
+      toast({
+        title: "Error",
+        description: "Please enter either a credit amount or debit amount.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const transactionData = {
       payment_type: formData.type as 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other',
@@ -168,14 +224,62 @@ export default function Transactions() {
   });
 
   const filteredTransactions = transactions?.filter((transaction) => {
-    const matchesSearch = transaction.notes
-      ?.toLowerCase()
-      .includes(searchTerm.toLowerCase()) || false;
-    return matchesSearch;
+    // Search filter
+    const matchesSearch = !searchTerm || 
+      transaction.notes?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      transaction.transaction_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      transaction.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      false;
+
+    // Category filter
+    const matchesCategory = !categoryFilter || categoryFilter === "all" || 
+      transaction.category === categoryFilter;
+
+    // Type filter
+    const matchesType = !typeFilter || typeFilter === "all" || 
+      transaction.payment_type === typeFilter;
+
+    // Date range filter
+    const transactionDate = new Date(transaction.date);
+    const matchesDateRange = (!dateRangeFilter.start || transactionDate >= new Date(dateRangeFilter.start)) &&
+      (!dateRangeFilter.end || transactionDate <= new Date(dateRangeFilter.end));
+
+    // Amount filter - removed net amount calculation
+    const matchesAmountRange = true;
+
+    return matchesSearch && matchesCategory && matchesType && matchesDateRange && matchesAmountRange;
+  }).sort((a, b) => {
+    // Sorting logic
+    let aValue: any, bValue: any;
+    
+    switch (sortBy) {
+      case 'date':
+        aValue = new Date(a.date);
+        bValue = new Date(b.date);
+        break;
+      case 'category':
+        aValue = a.category || '';
+        bValue = b.category || '';
+        break;
+      case 'description':
+        aValue = a.transaction_name || '';
+        bValue = b.transaction_name || '';
+        break;
+      default:
+        aValue = new Date(a.date);
+        bValue = new Date(b.date);
+    }
+
+    if (sortOrder === 'asc') {
+      return aValue > bValue ? 1 : -1;
+    } else {
+      return aValue < bValue ? 1 : -1;
+    }
   }) || [];
 
   const categories = [...new Set(transactions?.map(t => t.category) || [])];
   const types = [...new Set(transactions?.map(t => t.payment_type) || [])];
+
 
   if (isLoading) {
     return (
@@ -222,11 +326,26 @@ export default function Transactions() {
               transition={{ delay: 0.2 }}
               className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4 sm:mt-0"
             >
-              <Button variant="outline" className="w-full sm:w-auto text-sm">
-                <Download className="w-4 h-4 mr-2" />
-                <span className="hidden sm:inline">Export</span>
-                <span className="sm:hidden">Export</span>
-              </Button>
+              <div className="flex space-x-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full sm:w-auto text-sm"
+                  onClick={handleExportCSV}
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Export CSV</span>
+                  <span className="sm:hidden">CSV</span>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full sm:w-auto text-sm"
+                  onClick={handleExportSummary}
+                >
+                  <TrendingUp className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Summary</span>
+                  <span className="sm:hidden">Summary</span>
+                </Button>
+              </div>
               <Button className="btn-gradient w-full sm:w-auto text-sm" onClick={() => setIsAddModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Add Transaction</span>
@@ -244,59 +363,185 @@ export default function Transactions() {
           className="mb-6"
         >
           <Card className="card-elevated p-4 sm:p-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search transactions..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 text-sm"
-                />
+            <div className="space-y-4">
+              {/* First row - Basic filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search transactions..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 text-sm"
+                  />
+                </div>
+
+                {/* Category Filter */}
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category?.replace('_', ' ') || category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Type Filter */}
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="All Types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {types.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type?.replace('_', ' ') || type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Sort By */}
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date">Date</SelectItem>
+                    <SelectItem value="category">Category</SelectItem>
+                    <SelectItem value="description">Description</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* Category Filter */}
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="All Categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  {categories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category?.replace('_', ' ') || category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Second row - Advanced filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                {/* Date Range Start */}
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="date"
+                    placeholder="Start Date"
+                    value={dateRangeFilter.start}
+                    onChange={(e) => setDateRangeFilter(prev => ({ ...prev, start: e.target.value }))}
+                    className="pl-10 text-sm"
+                  />
+                </div>
 
-              {/* Type Filter */}
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="All Types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {types.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type?.replace('_', ' ') || type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {/* Date Range End */}
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="date"
+                    placeholder="End Date"
+                    value={dateRangeFilter.end}
+                    onChange={(e) => setDateRangeFilter(prev => ({ ...prev, end: e.target.value }))}
+                    className="pl-10 text-sm"
+                  />
+                </div>
 
-              {/* Date Range */}
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="date"
-                  className="pl-10 text-sm"
-                />
+              </div>
+
+              {/* Sort Order and Clear Filters */}
+              <div className="flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-muted-foreground">Sort Order:</span>
+                  <Button
+                    variant={sortOrder === 'desc' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setSortOrder('desc')}
+                  >
+                    <TrendingDown className="w-4 h-4 mr-1" />
+                    Desc
+                  </Button>
+                  <Button
+                    variant={sortOrder === 'asc' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setSortOrder('asc')}
+                  >
+                    <TrendingUp className="w-4 h-4 mr-1" />
+                    Asc
+                  </Button>
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setCategoryFilter("");
+                    setTypeFilter("");
+                    setDateRangeFilter({ start: "", end: "" });
+                    setSortBy("date");
+                    setSortOrder("desc");
+                  }}
+                >
+                  Clear Filters
+                </Button>
               </div>
             </div>
           </Card>
         </motion.div>
+
+        {/* Summary Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15, duration: 0.5 }}
+          className="mb-6"
+        >
+          <Card className="card-elevated p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground">Total Transactions</p>
+                <p className="text-2xl font-bold text-primary">{filteredTransactions.length}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground">Total Credits</p>
+                <p className="text-2xl font-bold text-green-600">
+                  ₹{filteredTransactions.reduce((sum, t) => sum + (t.credit_amount || 0), 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground">Total Debits</p>
+                <p className="text-2xl font-bold text-red-600">
+                  ₹{filteredTransactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+            </div>
+            
+          </Card>
+        </motion.div>
+
+
+        {/* Charts Section - Only show if there are transactions with debit amounts */}
+        {filteredTransactions.length > 0 && filteredTransactions.some(t => (t.debit_amount || 0) > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.5 }}
+            className="mb-6"
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <SpendingChart 
+                transactions={filteredTransactions}
+                title="Spending by Category"
+                className="h-96"
+              />
+              <SpendingChart 
+                transactions={filteredTransactions}
+                title="Monthly Spending Trend"
+                className="h-96"
+              />
+            </div>
+          </motion.div>
+        )}
 
         {/* Transactions Table - Desktop */}
         <motion.div
@@ -317,7 +562,7 @@ export default function Transactions() {
                     <th className="text-left p-4 font-medium text-sm">Category</th>
                     <th className="text-right p-4 font-medium text-sm">Credit (+₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Debit (-₹)</th>
-                        <th className="text-left p-4 font-medium text-sm">Proof</th>
+                    <th className="text-left p-4 font-medium text-sm">Proof</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,9 +610,7 @@ export default function Transactions() {
                           <div className="font-semibold text-right text-green-600">
                             {(transaction.credit_amount && transaction.credit_amount > 0) ? 
                               `+₹${transaction.credit_amount.toLocaleString()}` : 
-                              (transaction.amount && transaction.amount > 0) ? 
-                                `+₹${transaction.amount.toLocaleString()}` : 
-                                '-'
+                              '-'
                             }
                           </div>
                         </td>
@@ -375,9 +618,7 @@ export default function Transactions() {
                           <div className="font-semibold text-right text-red-600">
                             {(transaction.debit_amount && transaction.debit_amount > 0) ? 
                               `-₹${transaction.debit_amount.toLocaleString()}` : 
-                              (transaction.amount && transaction.amount < 0) ? 
-                                `-₹${Math.abs(transaction.amount).toLocaleString()}` : 
-                                '-'
+                              '-'
                             }
                           </div>
                         </td>
@@ -436,11 +677,7 @@ export default function Transactions() {
                           <span className="text-green-600">+₹{transaction.credit_amount.toLocaleString()}</span> : 
                           (transaction.debit_amount && transaction.debit_amount > 0) ? 
                             <span className="text-red-600">-₹{transaction.debit_amount.toLocaleString()}</span> : 
-                            (transaction.amount && transaction.amount > 0) ? 
-                              <span className="text-green-600">+₹{transaction.amount.toLocaleString()}</span> : 
-                              (transaction.amount && transaction.amount < 0) ? 
-                                <span className="text-red-600">-₹{Math.abs(transaction.amount).toLocaleString()}</span> : 
-                                <span className="text-muted-foreground">₹0</span>
+                            <span className="text-muted-foreground">₹0</span>
                         }
                       </div>
                     </div>
@@ -525,16 +762,40 @@ export default function Transactions() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="amount">Amount *</Label>
+                  <Label htmlFor="transaction_name">Transaction Name</Label>
                   <Input
-                    id="amount"
-                    name="amount"
+                    id="transaction_name"
+                    name="transaction_name"
+                    value={formData.transaction_name}
+                    onChange={handleInputChange}
+                    placeholder="Enter transaction name"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="credit_amount">Credit Amount (₹)</Label>
+                  <Input
+                    id="credit_amount"
+                    name="credit_amount"
                     type="number"
                     step="0.01"
-                    value={formData.amount}
+                    value={formData.credit_amount}
                     onChange={handleInputChange}
                     placeholder="0.00"
-                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="debit_amount">Debit Amount (₹)</Label>
+                  <Input
+                    id="debit_amount"
+                    name="debit_amount"
+                    type="number"
+                    step="0.01"
+                    value={formData.debit_amount}
+                    onChange={handleInputChange}
+                    placeholder="0.00"
                   />
                 </div>
               </div>

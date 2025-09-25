@@ -30,10 +30,11 @@ export function ProofInput({ value, onChange, transactionId, disabled = false }:
     if (!file) return;
 
     // Validate file type
-    if (!file.type.startsWith('image/')) {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
       toast({
         title: "Invalid file type",
-        description: "Please upload an image file (JPG, PNG, GIF, etc.)",
+        description: "Please upload an image file (JPG, PNG, GIF, WebP)",
         variant: "destructive",
       });
       return;
@@ -52,24 +53,34 @@ export function ProofInput({ value, onChange, transactionId, disabled = false }:
     setIsUploading(true);
 
     try {
-      // Create a unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+      // Create a unique filename with better naming
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2, 8);
+      const fileName = `proof_${timestamp}_${randomId}.${fileExt}`;
       const filePath = `proofs/${fileName}`;
+
+      console.log('Uploading proof file:', { fileName, filePath, fileSize: file.size });
 
       // Upload file to Supabase Storage
       const { data, error } = await supabase.storage
         .from('uploads')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (error) {
-        throw error;
+        console.error('Storage upload error:', error);
+        throw new Error(`Upload failed: ${error.message}`);
       }
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('uploads')
         .getPublicUrl(filePath);
+
+      console.log('Proof uploaded successfully:', publicUrl);
 
       onChange(publicUrl);
       setPreviewUrl(publicUrl);
@@ -80,9 +91,10 @@ export function ProofInput({ value, onChange, transactionId, disabled = false }:
         description: "Proof image uploaded successfully.",
       });
     } catch (error: any) {
+      console.error('Proof upload error:', error);
       toast({
         title: "Upload failed",
-        description: error.message || "Failed to upload image",
+        description: error.message || "Failed to upload image. Please try again.",
         variant: "destructive",
       });
     } finally {

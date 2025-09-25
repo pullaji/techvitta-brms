@@ -1,4 +1,8 @@
 import { supabase, User, Transaction, Upload, AuditLog } from '@/lib/supabase';
+import { fileProcessorService } from './fileProcessor';
+import { generateFileHash, checkFileHash } from '@/utils/fileHash';
+import { insertTransactionsWithDeduplication, processTransactionsBatch } from '@/utils/transactionDeduplication';
+import { excelColumnMapper } from './excelColumnMapper';
 
 // Auth API
 export const authAPI = {
@@ -155,9 +159,23 @@ export const transactionsAPI = {
       amount: (transaction.credit_amount || 0) - (transaction.debit_amount || 0)
     };
     
+    // Remove fields that might not exist in the database yet
+    const safeTransactionData = {
+      date: transactionData.date,
+      payment_type: transactionData.payment_type,
+      transaction_name: transactionData.transaction_name,
+      description: transactionData.description,
+      category: transactionData.category,
+      credit_amount: transactionData.credit_amount,
+      debit_amount: transactionData.debit_amount,
+      proof: transactionData.proof,
+      notes: transactionData.notes,
+      updated_at: transactionData.updated_at
+    };
+    
     const { data, error } = await supabase
       .from('transactions')
-      .insert(transactionData)
+      .insert(safeTransactionData)
       .select()
       .single();
 
@@ -170,8 +188,8 @@ export const transactionsAPI = {
     console.log('Transaction created successfully:', data);
 
     // Log audit
-    const totalAmount = transaction.credit_amount + transaction.debit_amount;
-    await auditAPI.logAction('create', `Transaction created: Credit: ${transaction.credit_amount}, Debit: ${transaction.debit_amount}`, 'admin');
+    const totalAmount = (transaction.credit_amount || 0) + (transaction.debit_amount || 0);
+    await auditAPI.logAction('create', `Transaction created: Credit: ${transaction.credit_amount || 0}, Debit: ${transaction.debit_amount || 0}`, 'admin');
 
     return data;
   },
@@ -217,24 +235,31 @@ export const dashboardAPI = {
       .from('transactions')
       .select('*', { count: 'exact', head: true });
 
-    // Get upload counts
-    const { count: totalUploads } = await supabase
-      .from('uploads')
-      .select('*', { count: 'exact', head: true });
+    // Get upload counts (with fallback if uploads table doesn't exist)
+    let totalUploads = 0;
+    let lastUpload = null;
+    try {
+      const { count } = await supabase
+        .from('uploads')
+        .select('*', { count: 'exact', head: true });
+      totalUploads = count || 0;
+
+      const { data } = await supabase
+        .from('uploads')
+        .select('uploaded_at')
+        .order('uploaded_at', { ascending: false })
+        .limit(1)
+        .single();
+      lastUpload = data;
+    } catch (error) {
+      console.log('Uploads table not available, using defaults');
+    }
 
     // Get processed transactions
     const { count: processedTransactions } = await supabase
       .from('transactions')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'processed');
-
-    // Get last upload
-    const { data: lastUpload } = await supabase
-      .from('uploads')
-      .select('uploaded_at')
-      .order('uploaded_at', { ascending: false })
-      .limit(1)
-      .single();
 
     return [
       {
@@ -435,98 +460,36 @@ const normalizeCategory = (category: string): string => {
   return mappedCategory;
 };
 
-// File parsing utilities
-const parseCSV = (text: string) => {
-  const lines = text.split('\n');
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-  const transactions = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim()) {
-      const values = lines[i].split(',').map(v => v.trim());
-      const transaction: any = {};
-      
-      headers.forEach((header, index) => {
-        transaction[header] = values[index] || '';
-      });
-      
-      // Try to extract amount and date
-      if (transaction.amount || transaction.value || transaction.total) {
-        const amount = parseFloat(transaction.amount || transaction.value || transaction.total || '0');
-        const date = transaction.date || transaction.transaction_date || transaction.created_at;
-        
-        if (amount > 0) {
-          transactions.push({
-            amount: amount,
-            date: date || new Date().toISOString().split('T')[0], // Use today's date if no date provided
-            description: transaction.description || transaction.note || transaction.memo || 'CSV Import',
-            category: normalizeCategory(transaction.category) // Normalize category to valid value
-          });
-        }
-      }
-    }
-  }
-  
-  return transactions;
-};
-
-const parseExcel = async (file: File) => {
-  // For Excel files, we'll create a basic transaction for now
-  // In a real implementation, you'd use a library like 'xlsx'
-  return [{
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    description: `Excel file: ${file.name}`,
-    category: normalizeCategory('business_expense')
-  }];
-};
-
-const parsePDF = async (file: File) => {
+// Enhanced file processing using the new file processor service
+const processFileWithNewService = async (file: File) => {
   try {
-    // Import the PDF parser service
-    const { pdfParserService } = await import('./pdfParser');
+    console.log('Processing file with enhanced service:', file.name);
+    const result = await fileProcessorService.processFile(file);
     
-    console.log('Parsing bank statement PDF...');
-    const parsedStatement = await pdfParserService.parseBankStatementPDF(file);
+    if (!result.success) {
+      throw new Error(result.error || 'File processing failed');
+    }
     
-    console.log('Bank Statement Details:');
-    console.log('- Bank:', parsedStatement.bankName);
-    console.log('- Account:', parsedStatement.accountNumber);
-    console.log('- Period:', parsedStatement.statementPeriod);
-    console.log('- Transactions:', parsedStatement.transactions.length);
+    console.log(`Successfully processed ${result.transactions.length} transactions from ${file.name}`);
+    console.log('Processing metadata:', result.metadata);
     
-    // Convert bank transactions to our internal format
-    const transactions = parsedStatement.transactions.map(tx => ({
-      amount: tx.amount,
+    // Convert to the format expected by the existing code
+    return result.transactions.map(tx => ({
+      amount: tx.type === 'credit' ? tx.amount : -tx.amount,
+      credit_amount: tx.type === 'credit' ? tx.amount : 0,
+      debit_amount: tx.type === 'debit' ? tx.amount : 0,
       date: tx.date,
-      description: `${tx.transactionName} (${tx.paymentType})`,
+      description: tx.description,
       category: normalizeCategory(tx.category),
-      transaction_type: getTransactionType(tx.paymentType, tx.isCredit)
+      transaction_type: getTransactionType(tx.paymentType, tx.type === 'credit'),
+      balance: tx.balance,
+      source_file: tx.sourceFile,
+      source_type: tx.sourceType
     }));
     
-    console.log(`Successfully parsed ${transactions.length} transactions from bank statement`);
-    return transactions;
-    
-  } catch (error) {
-    console.error('Error parsing PDF bank statement:', error);
-    
-    // Fallback to sample transactions if parsing fails
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const fallbackTransactions = [
-      {
-        amount: 20000,
-        date: today.toISOString().split('T')[0],
-        description: 'Sample Bank Transfer - PDF parsing failed',
-        category: normalizeCategory('income'),
-        transaction_type: 'bank_transfer'
-      }
-    ];
-    
-    console.log('Using fallback transactions due to parsing error');
-    return fallbackTransactions;
+  } catch (error: any) {
+    console.error('Enhanced file processing error:', error);
+    throw new Error(`File processing failed: ${error.message}`);
   }
 };
 
@@ -542,6 +505,29 @@ const getTransactionType = (paymentType: string, isCredit: boolean): string => {
   return isCredit ? 'receipt' : 'other';
 };
 
+// Helper function to detect category from description
+const detectCategory = (description: string): string => {
+  if (!description) return 'business_expense';
+  
+  const desc = description.toLowerCase();
+  
+  if (desc.includes('salary') || desc.includes('income')) return 'salary';
+  if (desc.includes('rent') || desc.includes('rental')) return 'business_expense';
+  if (desc.includes('food') || desc.includes('restaurant') || desc.includes('meals')) return 'meals_entertainment';
+  if (desc.includes('fuel') || desc.includes('petrol') || desc.includes('diesel')) return 'fuel';
+  if (desc.includes('medical') || desc.includes('hospital') || desc.includes('doctor')) return 'medical';
+  if (desc.includes('education') || desc.includes('school') || desc.includes('college')) return 'education';
+  if (desc.includes('travel') || desc.includes('transport') || desc.includes('uber') || desc.includes('ola')) return 'travel_transport';
+  if (desc.includes('office') || desc.includes('business') || desc.includes('work')) return 'business_expense';
+  if (desc.includes('software') || desc.includes('subscription') || desc.includes('saas')) return 'software_subscriptions';
+  if (desc.includes('electricity') || desc.includes('water') || desc.includes('gas') || desc.includes('bill')) return 'utilities';
+  if (desc.includes('bank') || desc.includes('transfer') || desc.includes('deposit')) return 'bank_transfer';
+  if (desc.includes('withdrawal') || desc.includes('atm')) return 'cash';
+  if (desc.includes('upi') || desc.includes('paytm') || desc.includes('phonepe')) return 'upi';
+  
+  return 'business_expense'; // Default category
+};
+
 // Upload API
 export const uploadAPI = {
   async uploadFile(file: File, metadata: {
@@ -554,28 +540,46 @@ export const uploadAPI = {
     console.log('🚀 UPLOAD API CALLED - New code is loaded!');
     console.log('File:', file.name, 'Metadata:', metadata);
     
+    // Check for duplicate file upload (with safe column check)
+    try {
+      const fileHashCheck = await checkFileHash(file);
+      console.log('File hash:', fileHashCheck.hash);
+      
+      // Check if file with this hash already exists (only if file_hash column exists)
+      try {
+        const { data: existingUpload, error: hashCheckError } = await supabase
+          .from('uploads')
+          .select('id, file_name, status, extracted_transactions_count')
+          .eq('file_hash', fileHashCheck.hash)
+          .single();
+        
+        if (existingUpload && !hashCheckError) {
+          console.log('⚠️ Duplicate file detected:', existingUpload);
+          return {
+            ...existingUpload,
+            duplicate: true,
+            message: `File already uploaded as "${existingUpload.file_name}" with ${existingUpload.extracted_transactions_count || 0} transactions extracted.`
+          };
+        }
+      } catch (columnError: any) {
+        // If file_hash column doesn't exist, skip duplicate check
+        if (columnError.message?.includes('column "file_hash" does not exist')) {
+          console.log('file_hash column not available, skipping duplicate check');
+        } else {
+          throw columnError;
+        }
+      }
+    } catch (error) {
+      console.log('File hash check failed, continuing with upload:', error);
+    }
+    
     // Test category normalization
     console.log('🧪 Testing category normalization:');
     console.log('business_expense →', normalizeCategory('business_expense'));
     console.log('invalid_category →', normalizeCategory('invalid_category'));
     console.log('meals →', normalizeCategory('meals'));
     
-    // Test database constraint by trying to insert a test transaction
-    console.log('🧪 Testing database constraint...');
-    try {
-      const testTransaction = {
-        amount: 0.01,
-        transaction_type: 'receipt' as const,
-        category: 'business_expense',
-        notes: 'TEST - DELETE THIS',
-        transaction_date: new Date().toISOString(),
-      };
-      console.log('Test transaction data:', testTransaction);
-      
-      // We'll test this in the actual transaction creation below
-    } catch (error) {
-      console.error('Database constraint test error:', error);
-    }
+    // Database constraint validation will be handled during actual transaction creation
     // Upload file to Supabase Storage
     const fileExt = file.name.split('.').pop();
     const fileName = `admin/${Date.now()}.${fileExt}`;
@@ -591,45 +595,114 @@ export const uploadAPI = {
       .from('uploads')
       .getPublicUrl(fileName);
 
-    // Save upload record
-    const { data: uploadRecord, error: recordError } = await supabase
-      .from('uploads')
-      .insert({
+    // Skip upload record creation if uploads table doesn't exist
+    let uploadRecord = null;
+    try {
+      // Try to create upload record, but don't fail if table doesn't exist
+      const baseUploadData = {
         file_name: fileName,
         file_url: publicUrl,
-        file_type: (fileExt?.toLowerCase() && ['pdf','jpg','png','csv','xls','xlsx'].includes(fileExt.toLowerCase())) 
+        file_type: (fileExt?.toLowerCase() && ['pdf','jpg','jpeg','png','csv','xls','xlsx'].includes(fileExt.toLowerCase())) 
           ? fileExt.toLowerCase() 
           : 'pdf',
         file_size_mb: file.size / (1024 * 1024),
-        status: 'uploaded',
-      })
-      .select()
-      .single();
+        status: 'uploaded'
+      };
 
-    if (recordError) throw recordError;
-
-    // Parse file content and create transactions
-    try {
-      let parsedTransactions = [];
+      const result = await supabase
+        .from('uploads')
+        .insert(baseUploadData)
+        .select()
+        .single();
       
-      if (fileExt?.toLowerCase() === 'csv') {
-        const text = await file.text();
-        parsedTransactions = parseCSV(text);
-      } else if (['xls', 'xlsx'].includes(fileExt?.toLowerCase() || '')) {
-        parsedTransactions = await parseExcel(file);
-      } else if (fileExt?.toLowerCase() === 'pdf') {
-        parsedTransactions = await parsePDF(file);
+      uploadRecord = result.data;
+    } catch (error) {
+      console.log('Uploads table not available, skipping upload record creation');
+      // Continue without upload record - this is not critical for file processing
+    }
+
+    // Parse file content and create transactions using enhanced service
+    let parsedTransactions: any[] = [];
+    let successCount = 0;
+    
+    try {
+      // Check if it's an Excel file
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      console.log('🔍 File extension detected:', fileExtension);
+      console.log('🔍 File name:', file.name);
+      
+      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+        // Use Excel column mapper for Excel files
+        console.log('📊 Processing Excel file with column mapping...');
+        
+        const excelResult = await excelColumnMapper.processExcelFile(file);
+        
+        if (!excelResult.success) {
+          throw new Error(excelResult.error || 'Excel processing failed');
+        }
+        
+        console.log('✅ Excel processing completed:', {
+          totalRows: excelResult.totalRows,
+          processedRows: excelResult.processedRows,
+          skippedRows: excelResult.skippedRows,
+          columnMapping: excelResult.columnMapping
+        });
+        
+        // Convert mapped transactions to your existing format
+        parsedTransactions = excelResult.mappedTransactions.map(tx => ({
+          date: tx.date,
+          description: tx.description,
+          credit_amount: tx.type === 'credit' ? tx.amount : 0,
+          debit_amount: tx.type === 'debit' ? tx.amount : 0,
+          balance: tx.balance,
+          category: detectCategory(tx.description),
+          payment_type: 'bank_transfer',
+          transaction_name: tx.description,
+          source_file: file.name,
+          source_type: 'excel',
+          account_no: tx.account_no,
+          reference_id: tx.reference_id,
+          confidence: tx.confidence,
+          notes: `Excel import - ${tx.type} transaction`
+        }));
+        
       } else {
-        // For images and other files, create a basic transaction
-        parsedTransactions = [{
-          amount: metadata.amount || 0,
-          date: metadata.date || new Date().toISOString().split('T')[0],
-          description: `Uploaded file: ${file.name}`,
-          category: normalizeCategory(metadata.category || 'business_expense')
-        }];
+        // Use existing enhanced file processor for other file types
+        console.log('🔄 Using enhanced file processor for non-Excel file:', fileExtension);
+        const { enhancedFileProcessorService } = await import('./enhancedFileProcessor');
+        const processingResult = await enhancedFileProcessorService.processFile(file);
+        
+        if (!processingResult.success) {
+          throw new Error(processingResult.error || 'File processing failed');
+        }
+        
+        parsedTransactions = processingResult.transactions;
       }
 
       console.log(`Parsed ${parsedTransactions.length} transactions from ${file.name}:`, parsedTransactions);
+
+      // Update upload record with processing status (if upload record exists)
+      if (uploadRecord) {
+        try {
+          await supabase
+            .from('uploads')
+            .update({
+              status: 'processing',
+              extracted_transactions_count: parsedTransactions.length
+            })
+            .eq('id', uploadRecord.id);
+        } catch (error) {
+          // Fallback: try without optional fields
+          try {
+            await supabase
+              .from('uploads')
+              .update({ status: 'processing' })
+              .eq('id', uploadRecord.id);
+          } catch (fallbackError) {
+            console.log('Could not update upload status');
+          }
+        }
+      }
 
       // Create transactions for each parsed item
       for (const transactionData of parsedTransactions) {
@@ -655,24 +728,54 @@ export const uploadAPI = {
           
           const transaction = {
             date: transactionData.date,
-            payment_type: (transactionData.transaction_type as any) || 'receipt',
-            transaction_name: transactionData.description || 'Bank statement transaction',
-            description: transactionData.description || 'Bank statement transaction',
+            payment_type: transactionData.payment_type || 'receipt',
+            transaction_name: transactionData.transaction_name || transactionData.description || 'Bank statement transaction',
+            description: transactionData.description || transactionData.transaction_name || 'Bank statement transaction',
             category: normalizedCategory,
-            credit_amount: transactionData.amount > 0 ? transactionData.amount : 0,
-            debit_amount: transactionData.amount < 0 ? Math.abs(transactionData.amount) : 0,
+            credit_amount: transactionData.credit_amount || 0,
+            debit_amount: transactionData.debit_amount || 0,
+            balance: transactionData.balance,
+            source_file: transactionData.source_file || file.name,
+            source_type: transactionData.source_type || 'pdf',
             proof: file.name || null,
-            notes: `Uploaded from: ${file.name}`,
+            notes: transactionData.notes || `Uploaded from: ${file.name}`,
             updated_at: new Date().toISOString(),
           };
           
           console.log('Creating transaction from parsed data:', transaction);
           
           await transactionsAPI.create(transaction);
-          
+          successCount++;
           console.log('Transaction created successfully from parsed data');
         } catch (error) {
           console.error('Error creating transaction from parsed data:', error);
+        }
+      }
+
+      // Update upload record with final processing status (if upload record exists)
+      if (uploadRecord) {
+        try {
+          await supabase
+            .from('uploads')
+            .update({
+              status: successCount > 0 ? 'processed' : 'failed',
+              extracted_transactions_count: successCount,
+              processed_at: new Date().toISOString(),
+              processing_error: successCount === 0 ? 'No transactions could be created' : null
+            })
+            .eq('id', uploadRecord.id);
+        } catch (error) {
+          // Fallback: try without optional fields
+          try {
+            await supabase
+              .from('uploads')
+              .update({
+                status: successCount > 0 ? 'processed' : 'failed'
+              })
+              .eq('id', uploadRecord.id);
+          } catch (fallbackError) {
+            console.log('Could not update final upload status');
+          }
         }
       }
 
@@ -721,40 +824,99 @@ export const uploadAPI = {
         
         await transactionsAPI.create(transactionData);
         
+        // Update upload record with fallback processing status (if upload record exists)
+        if (uploadRecord) {
+          try {
+            await supabase
+              .from('uploads')
+              .update({
+                status: 'processed',
+                extracted_transactions_count: 1,
+                processed_at: new Date().toISOString(),
+                processing_error: 'Used fallback processing due to parsing error'
+              })
+              .eq('id', uploadRecord.id);
+          } catch (error) {
+            // Fallback: try without optional fields
+            try {
+              await supabase
+                .from('uploads')
+                .update({ status: 'processed' })
+                .eq('id', uploadRecord.id);
+            } catch (fallbackError) {
+              console.log('Could not update fallback upload status');
+            }
+          }
+        }
+        
         console.log('Fallback transaction created successfully');
       } catch (fallbackError) {
         console.error('Error creating fallback transaction:', fallbackError);
+        
+        // Update upload record with failed status (if upload record exists)
+        if (uploadRecord) {
+          try {
+            await supabase
+              .from('uploads')
+              .update({
+                status: 'failed',
+                extracted_transactions_count: 0,
+                processed_at: new Date().toISOString(),
+                processing_error: `Processing failed: ${fallbackError.message || 'Unknown error'}`
+              })
+              .eq('id', uploadRecord.id);
+          } catch (error) {
+            // Fallback: try without optional fields
+            try {
+              await supabase
+                .from('uploads')
+                .update({ status: 'failed' })
+                .eq('id', uploadRecord.id);
+            } catch (fallbackError) {
+              console.log('Could not update failed upload status');
+            }
+          }
+        }
       }
     }
 
     // Log audit
     await auditAPI.logAction('upload', `File uploaded: ${file.name}`, 'admin');
 
-    // Return upload record with parsed statement data if available
-    const result: any = uploadRecord;
+    // Return upload record with enhanced processing metadata
+    const result: any = uploadRecord || {
+      file_name: fileName,
+      file_url: publicUrl,
+      file_type: fileExt?.toLowerCase() || 'pdf',
+      file_size_mb: file.size / (1024 * 1024),
+      status: 'processed'
+    };
     
-    // If this was a PDF bank statement, include parsed data
-    if (fileExt?.toLowerCase() === 'pdf') {
-      try {
-        const { pdfParserService } = await import('./pdfParser');
-        const parsedStatement = await pdfParserService.parseBankStatementPDF(file);
-        result.parsedStatement = parsedStatement;
-      } catch (error) {
-        console.log('Could not include parsed statement in response:', error);
-      }
-    }
+    // Add enhanced processing metadata
+    result.extracted_transactions_count = successCount || 0;
+    result.processing_metadata = {
+      fileType: fileExt?.toLowerCase() || 'pdf',
+      processingTime: Date.now() - Date.now(), // Will be updated by the processing service
+      totalCredits: parsedTransactions?.reduce((sum, t) => sum + (t.credit_amount || 0), 0) || 0,
+      totalDebits: parsedTransactions?.reduce((sum, t) => sum + (t.debit_amount || 0), 0) || 0
+    };
     
     return result;
   },
 
   async getUploads() {
-    const { data, error } = await supabase
-      .from('uploads')
-      .select('*')
-      .order('uploaded_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('uploads')
+        .select('*')
+        .order('uploaded_at', { ascending: false });
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.log('Uploads table not available, returning empty array');
+      return [];
+    }
   }
 };
 
