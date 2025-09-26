@@ -13,19 +13,19 @@ export const ExcelTemplateDownloader: React.FC = () => {
       headers = ['Date', 'Description', 'Credit', 'Debit', 'Balance'];
       sampleData = [
         ['YYYY-MM-DD', 'Transaction Description', 'Credit Amount', 'Debit Amount', 'Balance'],
-        ['2024-01-15', 'Sample Credit Transaction', 1000, '', 1000],
-        ['2024-01-16', 'Sample Debit Transaction', '', 500, 500],
-        ['2024-01-17', 'Another Credit Transaction', 2000, '', 2500],
-        ['2024-01-18', 'Another Debit Transaction', '', 300, 2200]
+        ['', 'Enter your transaction description', '', '', ''],
+        ['', 'Enter your transaction description', '', '', ''],
+        ['', 'Enter your transaction description', '', '', ''],
+        ['', 'Enter your transaction description', '', '', '']
       ];
     } else {
       headers = ['Date', 'Description', 'Amount', 'Balance'];
       sampleData = [
         ['YYYY-MM-DD', 'Transaction Description', 'Amount (+/-)', 'Balance'],
-        ['2024-01-15', 'Sample Credit Transaction', 1000, 1000],
-        ['2024-01-16', 'Sample Debit Transaction', -500, 500],
-        ['2024-01-17', 'Another Credit Transaction', 2000, 2500],
-        ['2024-01-18', 'Another Debit Transaction', -300, 2200]
+        ['', 'Enter your transaction description', '', ''],
+        ['', 'Enter your transaction description', '', ''],
+        ['', 'Enter your transaction description', '', ''],
+        ['', 'Enter your transaction description', '', '']
       ];
     }
     

@@ -701,13 +701,41 @@ class EnhancedFileProcessorService {
   private parseDate(dateValue: any): string {
     if (!dateValue) return new Date().toISOString().split('T')[0];
     
-    const date = new Date(dateValue);
-    if (isNaN(date.getTime())) {
-      console.warn(`Invalid date: ${dateValue}, using current date`);
+    try {
+      let date: Date;
+      
+      // Handle Excel serial date numbers
+      if (typeof dateValue === 'number') {
+        // Excel serial date number (days since 1900-01-01, with leap year bug)
+        date = new Date((dateValue - 25569) * 86400 * 1000);
+      } else if (typeof dateValue === 'string') {
+        // String date - try multiple formats
+        const dateStr = dateValue.toString().trim();
+        const formats = [
+          /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/, // DD/MM/YYYY or DD-MM-YYYY
+          /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/, // YYYY/MM/DD or YYYY-MM-DD
+          /^\d{1,2}\s+\w+\s+\d{4}$/, // DD Month YYYY
+        ];
+        
+        if (formats.some(format => format.test(dateStr))) {
+          date = new Date(dateStr);
+        } else {
+          date = new Date(dateValue);
+        }
+      } else {
+        date = new Date(dateValue);
+      }
+      
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid date: ${dateValue}, using current date`);
+        return new Date().toISOString().split('T')[0];
+      }
+      
+      return date.toISOString().split('T')[0];
+    } catch (error) {
+      console.warn(`Date parsing error for: ${dateValue}, using current date`, error);
       return new Date().toISOString().split('T')[0];
     }
-    
-    return date.toISOString().split('T')[0];
   }
 
   // Parse amount from various formats

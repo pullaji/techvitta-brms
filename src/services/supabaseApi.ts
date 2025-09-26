@@ -139,12 +139,14 @@ const processExcelFileSimple = async (file: File) => {
           // Check if it looks like an amount
           const numValue = parseFloat(cell.toString().replace(/[₹,+\s]/g, ''));
           if (!isNaN(numValue) && numValue > 0) {
-            if (columnMapping.credit === -1 && numValue > 1000) {
+            // Use column headers to determine credit/debit instead of hardcoded amounts
+            const header = headers[colIndex]?.toLowerCase() || '';
+            if (columnMapping.credit === -1 && (header.includes('credit') || header.includes('deposit') || header.includes('income'))) {
               columnMapping.credit = colIndex;
-              console.log(`✅ Detected Credit column from data: column ${colIndex} (value: ${cell})`);
-            } else if (columnMapping.debit === -1 && numValue <= 1000) {
+              console.log(`✅ Detected Credit column from header: column ${colIndex} (${header})`);
+            } else if (columnMapping.debit === -1 && (header.includes('debit') || header.includes('withdrawal') || header.includes('expense'))) {
               columnMapping.debit = colIndex;
-              console.log(`✅ Detected Debit column from data: column ${colIndex} (value: ${cell})`);
+              console.log(`✅ Detected Debit column from header: column ${colIndex} (${header})`);
             }
           }
         });
@@ -177,13 +179,38 @@ const processExcelFileSimple = async (file: File) => {
       if (columnMapping.date !== -1 && row[columnMapping.date]) {
         try {
           const dateValue = row[columnMapping.date];
-          const parsedDate = new Date(dateValue);
+          let parsedDate: Date;
+          
+          // Handle Excel serial date numbers
+          if (typeof dateValue === 'number') {
+            // Excel serial date number (days since 1900-01-01, with leap year bug)
+            parsedDate = new Date((dateValue - 25569) * 86400 * 1000);
+          } else if (typeof dateValue === 'string') {
+            // String date - try multiple formats
+            const dateStr = dateValue.toString().trim();
+            const formats = [
+              /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/, // DD/MM/YYYY or DD-MM-YYYY
+              /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/, // YYYY/MM/DD or YYYY-MM-DD
+              /^\d{1,2}\s+\w+\s+\d{4}$/, // DD Month YYYY
+            ];
+            
+            if (formats.some(format => format.test(dateStr))) {
+              parsedDate = new Date(dateStr);
+            } else {
+              parsedDate = new Date(dateValue);
+            }
+          } else {
+            parsedDate = new Date(dateValue);
+          }
+          
           if (!isNaN(parsedDate.getTime())) {
             date = parsedDate.toISOString().split('T')[0];
             console.log(`✅ Extracted date from column ${columnMapping.date}: ${dateValue} -> ${date}`);
+          } else {
+            console.log(`⚠️ Invalid date format: ${dateValue}`);
           }
         } catch (e) {
-          console.log(`⚠️ Failed to parse date from column ${columnMapping.date}: ${row[columnMapping.date]}`);
+          console.log(`⚠️ Failed to parse date from column ${columnMapping.date}: ${row[columnMapping.date]}`, e);
         }
       }
       
@@ -224,13 +251,18 @@ const processExcelFileSimple = async (file: File) => {
           if (value) {
             const numValue = parseFloat(value.toString().replace(/[₹,+\s]/g, ''));
             if (!isNaN(numValue) && numValue > 0) {
-              // Determine if it's debit or credit based on context
-              if (numValue > 1000) {
+              // Determine if it's debit or credit based on column header
+              const header = headers[j]?.toLowerCase() || '';
+              if (header.includes('credit') || header.includes('deposit') || header.includes('income')) {
                 creditAmount = numValue;
                 console.log(`✅ Found credit amount in column ${j}: ${value} -> ${creditAmount}`);
-              } else {
+              } else if (header.includes('debit') || header.includes('withdrawal') || header.includes('expense')) {
                 debitAmount = numValue;
                 console.log(`✅ Found debit amount in column ${j}: ${value} -> ${debitAmount}`);
+              } else {
+                // Default to credit for positive amounts if no clear header
+                creditAmount = numValue;
+                console.log(`✅ Found amount in column ${j} (defaulting to credit): ${value} -> ${creditAmount}`);
               }
               break;
             }
@@ -273,10 +305,11 @@ const processExcelFileSimple = async (file: File) => {
       
       // Create transaction if we have valid data
       if (date && description && (debitAmount > 0 || creditAmount > 0)) {
-        // Block obvious dummy data
-        if ((debitAmount === 0.02 || creditAmount === 0.02) || 
-            (debitAmount === 44958 || creditAmount === 44958)) {
-          console.log(`🚫 BLOCKED dummy data from row ${i} - debit: ${debitAmount}, credit: ${creditAmount}`);
+        // Block obvious dummy data based on patterns, not hardcoded values
+        if ((debitAmount === 0.01 || creditAmount === 0.01) || 
+            (debitAmount === 0.02 || creditAmount === 0.02) ||
+            (description.toLowerCase().includes('test') && (debitAmount < 1 || creditAmount < 1))) {
+          console.log(`🚫 BLOCKED potential dummy data from row ${i} - debit: ${debitAmount}, credit: ${creditAmount}, description: ${description}`);
           continue;
         }
         
@@ -1009,18 +1042,18 @@ export const uploadAPI = {
             console.log(`Date parsing error for "${transactionData.date}", using current date: ${transactionDate}`);
           }
           
-          // Ensure we're not inserting dummy data
-          if (transactionData.transaction_name === 'Test Transaction' || 
-              transactionData.description === 'Test Description' ||
-              transactionData.source_file === 'test.xlsx' ||
-              transactionData.transaction_name?.includes('File upload:') ||
-              transactionData.description?.includes('File uploaded:')) {
-            console.warn(`⚠️ Skipping dummy/fallback transaction: ${transactionData.transaction_name}`);
+          // Ensure we're not inserting dummy data based on patterns
+          if (transactionData.transaction_name?.toLowerCase().includes('test') || 
+              transactionData.description?.toLowerCase().includes('test') ||
+              transactionData.source_file?.toLowerCase().includes('test') ||
+              transactionData.transaction_name?.toLowerCase().includes('dummy') ||
+              transactionData.description?.toLowerCase().includes('dummy')) {
+            console.warn(`⚠️ Skipping potential dummy/fallback transaction: ${transactionData.transaction_name}`);
             continue;
           }
           
           const transaction = {
-            date: transactionData.date,
+            date: transactionDate,
             payment_type: transactionData.payment_type || 'receipt',
             transaction_name: transactionData.transaction_name || transactionData.description || 'Bank statement transaction',
             description: transactionData.description || transactionData.transaction_name || 'Bank statement transaction',

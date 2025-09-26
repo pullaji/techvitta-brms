@@ -158,7 +158,6 @@ class ExcelColumnMapper {
     "debit_transaction_total_dr": "debit",
     "debit_transaction_sum_dr": "debit",
     "debit_transaction_balance_dr": "debit",
-    "amount_dr": "debit",
     "amt_dr": "debit",
     "value_dr": "debit",
     "total_dr": "debit",
@@ -230,7 +229,6 @@ class ExcelColumnMapper {
     "credit_transaction_total_cr": "credit",
     "credit_transaction_sum_cr": "credit",
     "credit_transaction_balance_cr": "credit",
-    "amount_cr": "credit",
     "amt_cr": "credit",
     "value_cr": "credit",
     "total_cr": "credit",
@@ -540,12 +538,18 @@ class ExcelColumnMapper {
           return sum + (parsed > 0 ? parsed : 0);
         }, 0) / amountCount;
         
-        if (avgAmount > 1000) { // Likely credit amounts are larger
+        // Use column header to determine credit/debit instead of hardcoded amounts
+        const header = headers[colIndex]?.toLowerCase() || '';
+        if (header.includes('credit') || header.includes('deposit') || header.includes('income')) {
           mapping[colIndex.toString()] = 'credit';
-          console.log(`✅ Column ${colIndex} mapped to 'credit' (${amountCount}/${columnValues.length} values look like amounts, avg: ${avgAmount})`);
-    } else {
+          console.log(`✅ Column ${colIndex} mapped to 'credit' based on header: ${header}`);
+        } else if (header.includes('debit') || header.includes('withdrawal') || header.includes('expense')) {
           mapping[colIndex.toString()] = 'debit';
-          console.log(`✅ Column ${colIndex} mapped to 'debit' (${amountCount}/${columnValues.length} values look like amounts, avg: ${avgAmount})`);
+          console.log(`✅ Column ${colIndex} mapped to 'debit' based on header: ${header}`);
+        } else {
+          // Default to credit if no clear header
+          mapping[colIndex.toString()] = 'credit';
+          console.log(`✅ Column ${colIndex} mapped to 'credit' (default, no clear header)`);
         }
         continue;
       }
@@ -598,14 +602,9 @@ class ExcelColumnMapper {
           !this.looksLikeAccountNumber(value.toString()) && 
           !this.looksLikeBranchCode(value.toString())) {
         
-        // Determine if it's credit or debit based on context
-        if (amount > 1000) { // Likely credit amounts are larger
-          mapping[i.toString()] = 'credit';
-          console.log(`✅ Column ${i} mapped to 'credit': ${value}`);
-        } else {
-          mapping[i.toString()] = 'debit';
-          console.log(`✅ Column ${i} mapped to 'debit': ${value}`);
-        }
+        // Default to credit for positive amounts (no hardcoded thresholds)
+        mapping[i.toString()] = 'credit';
+        console.log(`✅ Column ${i} mapped to 'credit': ${value}`);
         continue;
       }
       
@@ -900,12 +899,18 @@ class ExcelColumnMapper {
           const value = row[i];
           if (value && this.parseAmount(value) > 0) {
             const amount = this.parseAmount(value);
-            if (amount > 1000) {
+            // Use column header to determine credit/debit instead of hardcoded amounts
+            const header = headers[i]?.toLowerCase() || '';
+            if (header.includes('credit') || header.includes('deposit') || header.includes('income')) {
               creditAmount = amount;
               console.log(`✅ Found credit amount in column ${i}: ${value} -> ${amount}`);
-            } else {
+            } else if (header.includes('debit') || header.includes('withdrawal') || header.includes('expense')) {
               debitAmount = amount;
               console.log(`✅ Found debit amount in column ${i}: ${value} -> ${amount}`);
+            } else {
+              // Default to credit if no clear header
+              creditAmount = amount;
+              console.log(`✅ Found amount in column ${i} (defaulting to credit): ${value} -> ${amount}`);
             }
             break;
           }
