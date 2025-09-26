@@ -53,6 +53,7 @@ export default function Transactions() {
   const [dateRangeFilter, setDateRangeFilter] = useState({ start: "", end: "" });
   const [sortBy, setSortBy] = useState("date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [showAll, setShowAll] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
@@ -271,9 +272,12 @@ export default function Transactions() {
 
   // Fetch transactions from Supabase
   const { data: transactions, isLoading, error } = useQuery({
-    queryKey: ['transactions'],
-    queryFn: () => transactionsAPI.getAll({}),
+    queryKey: ['transactions', showAll],
+    queryFn: () => transactionsAPI.getAll({ showAll }),
   });
+
+  // Get the source file name for display
+  const latestSourceFile = transactions && transactions.length > 0 ? transactions[0]?.source_file : null;
 
   const filteredTransactions = transactions?.filter((transaction) => {
     // Search filter
@@ -531,23 +535,42 @@ export default function Transactions() {
 
               </div>
 
-              {/* Clear Filters */}
-              <div className="flex justify-end items-center">
+              {/* Show All Toggle */}
+              <div className="flex justify-start items-center">
                 <Button
-                  variant="outline"
+                  variant={showAll ? "default" : "outline"}
                   size="sm"
-                  onClick={() => {
-                    setSearchTerm("");
-                    setCategoryFilter("");
-                    setTypeFilter("");
-                    setDateRangeFilter({ start: "", end: "" });
-                    setSortBy("date");
-                    setSortOrder("desc");
-                  }}
+                  onClick={() => setShowAll(!showAll)}
+                  className={showAll ? "bg-primary text-primary-foreground" : ""}
                 >
-                  Clear Filters
+                  {showAll ? "Show Latest Only" : "Show All Transactions"}
                 </Button>
               </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* View Mode Indicator */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12, duration: 0.5 }}
+          className="mb-4"
+        >
+          <Card className="card-elevated p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className={`w-3 h-3 rounded-full ${showAll ? 'bg-blue-500' : 'bg-green-500'}`}></div>
+                <span className="text-sm font-medium">
+                  {showAll 
+                    ? 'Showing all transactions from all uploads' 
+                    : `Showing only transactions from latest upload${latestSourceFile ? ` (${latestSourceFile})` : ''}`
+                  }
+                </span>
+              </div>
+              <Badge variant={showAll ? "secondary" : "default"} className="text-xs">
+                {showAll ? 'All Uploads' : 'Latest Upload'}
+              </Badge>
             </div>
           </Card>
         </motion.div>
@@ -808,7 +831,10 @@ export default function Transactions() {
               <Receipt className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
               <h3 className="heading-md text-xl mb-2">No transactions found</h3>
               <p className="text-muted-foreground mb-6">
-                Try adjusting your search criteria or add a new transaction.
+                {showAll 
+                  ? "Try adjusting your search criteria or add a new transaction."
+                  : "No transactions found in the latest upload. Try clicking 'Show All Transactions' to see all records, or upload a new file."
+                }
               </p>
               <Button className="btn-gradient" onClick={() => setIsAddModalOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />

@@ -453,11 +453,33 @@ export const transactionsAPI = {
     endDate?: string;
     limit?: number;
     offset?: number;
+    showAll?: boolean;
   }) {
     let query = supabase
       .from('transactions')
       .select('*')
       .order('date', { ascending: false });
+
+    // If showAll is false (default), filter to show only latest upload
+    if (params?.showAll === false) {
+      // Get the most recent source_file from transactions
+      const { data: latestSourceFile, error: latestError } = await supabase
+        .from('transactions')
+        .select('source_file, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (latestError) {
+        console.log('No transactions found or error fetching latest source file:', latestError);
+        // If no transactions exist, return empty result
+        return [];
+      }
+
+      if (latestSourceFile?.source_file) {
+        query = query.eq('source_file', latestSourceFile.source_file);
+      }
+    }
 
     if (params?.category) {
       query = query.eq('category', params.category);
