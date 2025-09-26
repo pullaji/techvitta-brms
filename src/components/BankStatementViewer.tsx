@@ -151,7 +151,6 @@ export const BankStatementViewer: React.FC<BankStatementViewerProps> = ({ parsed
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Payment Type</TableHead>
-                  <TableHead>Transaction Name</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
@@ -164,11 +163,6 @@ export const BankStatementViewer: React.FC<BankStatementViewerProps> = ({ parsed
                     </TableCell>
                     <TableCell>
                       {getPaymentTypeBadge(transaction.paymentType)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="max-w-xs truncate" title={transaction.transactionName}>
-                        {transaction.transactionName}
-                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant={getCategoryBadgeVariant(transaction.category) as any}>

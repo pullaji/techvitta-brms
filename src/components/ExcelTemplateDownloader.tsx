@@ -12,20 +12,20 @@ export const ExcelTemplateDownloader: React.FC = () => {
     if (format === 'separate') {
       headers = ['Date', 'Description', 'Credit', 'Debit', 'Balance'];
       sampleData = [
-        ['2024-01-15', 'Salary Credit', 50000, '', 50000],
-        ['2024-01-16', 'Rent Payment', '', 15000, 35000],
-        ['2024-01-17', 'UPI Transfer to Friend', '', 2000, 33000],
-        ['2024-01-18', 'Business Income', 25000, '', 58000],
-        ['2024-01-19', 'Grocery Shopping', '', 3000, 55000]
+        ['YYYY-MM-DD', 'Transaction Description', 'Credit Amount', 'Debit Amount', 'Balance'],
+        ['2024-01-15', 'Sample Credit Transaction', 1000, '', 1000],
+        ['2024-01-16', 'Sample Debit Transaction', '', 500, 500],
+        ['2024-01-17', 'Another Credit Transaction', 2000, '', 2500],
+        ['2024-01-18', 'Another Debit Transaction', '', 300, 2200]
       ];
     } else {
       headers = ['Date', 'Description', 'Amount', 'Balance'];
       sampleData = [
-        ['2024-01-15', 'Salary Credit', 50000, 50000],
-        ['2024-01-16', 'Rent Payment', -15000, 35000],
-        ['2024-01-17', 'UPI Transfer to Friend', -2000, 33000],
-        ['2024-01-18', 'Business Income', 25000, 58000],
-        ['2024-01-19', 'Grocery Shopping', -3000, 55000]
+        ['YYYY-MM-DD', 'Transaction Description', 'Amount (+/-)', 'Balance'],
+        ['2024-01-15', 'Sample Credit Transaction', 1000, 1000],
+        ['2024-01-16', 'Sample Debit Transaction', -500, 500],
+        ['2024-01-17', 'Another Credit Transaction', 2000, 2500],
+        ['2024-01-18', 'Another Debit Transaction', -300, 2200]
       ];
     }
     

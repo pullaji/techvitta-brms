@@ -1,49 +1,126 @@
--- Fix uploads table - Add missing columns that the code expects
--- This fixes the 400 Bad Request error when PATCHing uploads table
+-- Fix uploads table to add missing columns
+-- This addresses the 400 error when updating uploads table
 
--- Add missing columns to uploads table
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS extracted_transactions_count INTEGER DEFAULT 0;
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS file_hash TEXT;
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS file_type_detected VARCHAR(50);
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS confidence_score DECIMAL(3,2) DEFAULT 1.0;
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS transactions_count INTEGER DEFAULT 0;
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS column_mapping JSONB;
-ALTER TABLE uploads ADD COLUMN IF NOT EXISTS processing_metadata JSONB;
+-- Add extracted_transactions_count column if it doesn't exist
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'extracted_transactions_count'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN extracted_transactions_count INTEGER DEFAULT 0;
+        RAISE NOTICE 'Added extracted_transactions_count column to uploads table';
+    ELSE
+        RAISE NOTICE 'extracted_transactions_count column already exists';
+    END IF;
+END $$;
 
--- Add missing columns to transactions table
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'manual';
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS confidence DECIMAL(3,2) DEFAULT 1.0;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_no TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference_id TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS file_path TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS proof TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS type TEXT CHECK (type IN ('debit', 'credit'));
+-- Add other potentially missing columns
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'file_hash'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN file_hash TEXT;
+        RAISE NOTICE 'Added file_hash column to uploads table';
+    ELSE
+        RAISE NOTICE 'file_hash column already exists';
+    END IF;
+END $$;
 
--- Update existing records
-UPDATE uploads 
-SET 
-  file_type_detected = CASE 
-    WHEN file_name ILIKE '%.pdf' THEN 'pdf'
-    WHEN file_name ILIKE '%.xlsx' OR file_name ILIKE '%.xls' THEN 'excel'
-    WHEN file_name ILIKE '%.jpg' OR file_name ILIKE '%.jpeg' OR file_name ILIKE '%.png' THEN 'image'
-    WHEN file_name ILIKE '%.csv' THEN 'csv'
-    ELSE 'unknown'
-  END,
-  confidence_score = 1.0,
-  extracted_transactions_count = 0
-WHERE file_type_detected IS NULL;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'file_type_detected'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN file_type_detected TEXT;
+        RAISE NOTICE 'Added file_type_detected column to uploads table';
+    ELSE
+        RAISE NOTICE 'file_type_detected column already exists';
+    END IF;
+END $$;
 
-UPDATE transactions 
-SET 
-  source_type = 'manual',
-  confidence = 1.0
-WHERE source_type IS NULL;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'confidence_score'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN confidence_score NUMERIC(3,2);
+        RAISE NOTICE 'Added confidence_score column to uploads table';
+    ELSE
+        RAISE NOTICE 'confidence_score column already exists';
+    END IF;
+END $$;
 
--- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_uploads_file_type_detected ON uploads(file_type_detected);
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'transactions_count'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN transactions_count INTEGER DEFAULT 0;
+        RAISE NOTICE 'Added transactions_count column to uploads table';
+    ELSE
+        RAISE NOTICE 'transactions_count column already exists';
+    END IF;
+END $$;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'column_mapping'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN column_mapping JSONB;
+        RAISE NOTICE 'Added column_mapping column to uploads table';
+    ELSE
+        RAISE NOTICE 'column_mapping column already exists';
+    END IF;
+END $$;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'uploads' AND column_name = 'processing_metadata'
+    ) THEN
+        ALTER TABLE uploads ADD COLUMN processing_metadata JSONB;
+        RAISE NOTICE 'Added processing_metadata column to uploads table';
+    ELSE
+        RAISE NOTICE 'processing_metadata column already exists';
+    END IF;
+END $$;
+
+-- Create index on file_hash for better performance
 CREATE INDEX IF NOT EXISTS idx_uploads_file_hash ON uploads(file_hash);
-CREATE INDEX IF NOT EXISTS idx_transactions_source_type ON transactions(source_type);
-CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
 
--- Verify the changes
-SELECT 'Uploads table fixed successfully! Added missing columns.' as message;
+-- Verify the fix
+SELECT 
+    '✅ uploads table fix completed' as status,
+    COUNT(*) as total_columns
+FROM information_schema.columns 
+WHERE table_name = 'uploads';
+
+-- ========================================
+-- FIX CREDIT/DEBIT AMOUNT CONSTRAINT ISSUE
+-- ========================================
+
+-- Remove the problematic constraint that prevents both amounts from being positive
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS valid_amounts;
+
+-- Add a new flexible constraint
+ALTER TABLE transactions 
+ADD CONSTRAINT valid_amounts_flexible CHECK (
+    credit_amount >= 0 AND 
+    debit_amount >= 0 AND 
+    (credit_amount > 0 OR debit_amount > 0)
+);
+
+-- Fix any null values
+UPDATE transactions SET credit_amount = 0 WHERE credit_amount IS NULL;
+UPDATE transactions SET debit_amount = 0 WHERE debit_amount IS NULL;
+
+SELECT '✅ Credit/Debit amount constraint fixed!' as message;

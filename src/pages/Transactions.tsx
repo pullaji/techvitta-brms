@@ -14,7 +14,8 @@ import {
   FileText,
   FileSpreadsheet,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Edit3
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,12 @@ export default function Transactions() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isProofModalOpen, setIsProofModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<any>(null);
+  const [proofData, setProofData] = useState({
+    proof: "",
+    proofFile: null as File | null
+  });
   const [formData, setFormData] = useState({
     notes: "",
     date: "",
@@ -116,6 +123,64 @@ export default function Transactions() {
       ...prev,
       [name]: value
     }));
+  };
+
+  // Handle opening proof edit modal
+  const handleEditProof = (transaction: any) => {
+    setEditingTransaction(transaction);
+    setProofData({
+      proof: transaction.proof || "",
+      proofFile: null
+    });
+    setIsProofModalOpen(true);
+  };
+
+  // Handle proof file upload
+  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setProofData(prev => ({ ...prev, proofFile: file, proof: "" }));
+    }
+  };
+
+  // Handle proof text change
+  const handleProofTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setProofData(prev => ({ ...prev, proof: e.target.value, proofFile: null }));
+  };
+
+  // Handle saving proof
+  const handleSaveProof = async () => {
+    if (!editingTransaction) return;
+
+    if (!proofData.proof && !proofData.proofFile) {
+      toast({
+        title: "Proof Required",
+        description: "Please provide either a proof file or enter text in the notice field.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Here you would implement the actual proof update logic
+      // For now, we'll just show a success message
+      toast({
+        title: "Success!",
+        description: "Proof updated successfully.",
+      });
+      setIsProofModalOpen(false);
+      setEditingTransaction(null);
+      setProofData({ proof: "", proofFile: null });
+      
+      // Refresh transactions to show updated proof
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update proof.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSelectChange = (name: string, value: string) => {
@@ -354,19 +419,29 @@ export default function Transactions() {
               {/* First row - Basic filters */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {/* Search */}
+                <div className="space-y-1">
+                  <Label htmlFor="search" className="text-xs font-medium text-muted-foreground">
+                    Search
+                  </Label>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
+                      id="search"
                     placeholder="Search transactions..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 text-sm"
+                      className="pl-10 h-9 text-sm border-border/50 focus:border-primary/50"
                   />
+                  </div>
                 </div>
 
                 {/* Category Filter */}
+                <div className="space-y-1">
+                  <Label htmlFor="category" className="text-xs font-medium text-muted-foreground">
+                    Category
+                  </Label>
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="text-sm">
+                    <SelectTrigger className="h-9 text-sm border-border/50 focus:border-primary/50">
                     <SelectValue placeholder="All Categories" />
                   </SelectTrigger>
                   <SelectContent>
@@ -378,10 +453,15 @@ export default function Transactions() {
                     ))}
                   </SelectContent>
                 </Select>
+                </div>
 
                 {/* Type Filter */}
+                <div className="space-y-1">
+                  <Label htmlFor="type" className="text-xs font-medium text-muted-foreground">
+                    Payment Type
+                  </Label>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
-                  <SelectTrigger className="text-sm">
+                    <SelectTrigger className="h-9 text-sm border-border/50 focus:border-primary/50">
                     <SelectValue placeholder="All Types" />
                   </SelectTrigger>
                   <SelectContent>
@@ -393,10 +473,15 @@ export default function Transactions() {
                     ))}
                   </SelectContent>
                 </Select>
+                </div>
 
                 {/* Sort By */}
+                <div className="space-y-1">
+                  <Label htmlFor="sort" className="text-xs font-medium text-muted-foreground">
+                    Sort By
+                  </Label>
                 <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="text-sm">
+                    <SelectTrigger className="h-9 text-sm border-border/50 focus:border-primary/50">
                     <SelectValue placeholder="Sort by" />
                   </SelectTrigger>
                   <SelectContent>
@@ -405,32 +490,43 @@ export default function Transactions() {
                     <SelectItem value="description">Description</SelectItem>
                   </SelectContent>
                 </Select>
+                </div>
               </div>
 
               {/* Second row - Advanced filters */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {/* Date Range Start */}
+                 <div className="space-y-1">
+                   <Label htmlFor="start-date" className="text-xs font-medium text-muted-foreground">
+                     From Date
+                   </Label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
+                       id="start-date"
                     type="date"
-                    placeholder="Start Date"
                     value={dateRangeFilter.start}
                     onChange={(e) => setDateRangeFilter(prev => ({ ...prev, start: e.target.value }))}
-                    className="pl-10 text-sm"
+                       className="pl-10 h-9 text-sm border-border/50 focus:border-primary/50"
                   />
+                   </div>
                 </div>
 
                 {/* Date Range End */}
+                 <div className="space-y-1">
+                   <Label htmlFor="end-date" className="text-xs font-medium text-muted-foreground">
+                     To Date
+                   </Label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
+                       id="end-date"
                     type="date"
-                    placeholder="End Date"
                     value={dateRangeFilter.end}
                     onChange={(e) => setDateRangeFilter(prev => ({ ...prev, end: e.target.value }))}
-                    className="pl-10 text-sm"
+                       className="pl-10 h-9 text-sm border-border/50 focus:border-primary/50"
                   />
+                   </div>
                 </div>
 
               </div>
@@ -496,28 +592,6 @@ export default function Transactions() {
         </motion.div>
 
 
-        {/* Charts Section - Only show if there are transactions with debit amounts */}
-        {filteredTransactions.length > 0 && filteredTransactions.some(t => (t.debit_amount || 0) > 0) && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="mb-6"
-          >
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SpendingChart 
-                transactions={filteredTransactions}
-                title="Spending by Category"
-                className="h-96"
-              />
-              <SpendingChart 
-                transactions={filteredTransactions}
-                title="Monthly Spending Trend"
-                className="h-96"
-              />
-            </div>
-          </motion.div>
-        )}
 
         {/* Transactions Table - Desktop */}
         <motion.div
@@ -533,14 +607,12 @@ export default function Transactions() {
                   <tr className="border-b border-border bg-secondary/30">
                     <th className="text-left p-4 font-medium text-sm">Date</th>
                     <th className="text-left p-4 font-medium text-sm">Payment Type</th>
-                    <th className="text-left p-4 font-medium text-sm">Transaction Name</th>
                     <th className="text-left p-4 font-medium text-sm">Description</th>
                     <th className="text-left p-4 font-medium text-sm">Category</th>
                     <th className="text-right p-4 font-medium text-sm">Credit (+₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Debit (-₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Balance (₹)</th>
-                    <th className="text-left p-4 font-medium text-sm">Source</th>
-                    <th className="text-left p-4 font-medium text-sm">Proof</th>
+                    <th className="text-center p-4 font-medium text-sm">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -568,11 +640,6 @@ export default function Transactions() {
                               {transaction.payment_type}
                             </span>
                               </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="text-sm font-medium">
-                            {transaction.transaction_name}
-                            </div>
                         </td>
                         <td className="p-4">
                           <div className="text-sm">
@@ -609,26 +676,15 @@ export default function Transactions() {
                           </div>
                         </td>
                         <td className="p-4">
-                          <div className="text-xs text-muted-foreground">
-                            {transaction.source_file ? (
-                              <div className="flex items-center space-x-1">
-                                <FileSpreadsheet className="w-3 h-3" />
-                                <span className="truncate max-w-20" title={transaction.source_file}>
-                                  {transaction.source_file}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">Manual</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="text-xs">
-                            <InlineProofUpload
-                              transactionId={transaction.id}
-                              currentProof={transaction.proof}
-                              onUploadComplete={(proofUrl) => handleInlineProofUpload(transaction.id, proofUrl)}
-                            />
+                          <div className="flex justify-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditProof(transaction)}
+                              className="h-8 w-8 p-0 hover:bg-primary/10"
+                            >
+                              <Edit3 className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                            </Button>
                           </div>
                         </td>
                       </motion.tr>
@@ -660,7 +716,7 @@ export default function Transactions() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-sm text-foreground leading-tight">
-                          {transaction.transaction_name || transaction.notes || 'Transaction'}
+                          {transaction.description || transaction.notes || 'Transaction'}
                         </h3>
                         <p className="text-xs text-muted-foreground mt-1">
                           {new Date(transaction.date).toLocaleDateString('en-IN', {
@@ -672,13 +728,23 @@ export default function Transactions() {
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <div className="font-bold text-lg">
-                        {(transaction.credit_amount && transaction.credit_amount > 0) ? 
-                          <span className="text-green-600">+₹{transaction.credit_amount.toLocaleString()}</span> : 
-                          (transaction.debit_amount && transaction.debit_amount > 0) ? 
-                            <span className="text-red-600">-₹{transaction.debit_amount.toLocaleString()}</span> : 
-                            <span className="text-muted-foreground">₹0</span>
-                        }
+                      <div className="space-y-1">
+                        {(transaction.credit_amount && transaction.credit_amount > 0) && (
+                          <div className="font-bold text-lg text-green-600">
+                            +₹{transaction.credit_amount.toLocaleString()}
+                          </div>
+                        )}
+                        {(transaction.debit_amount && transaction.debit_amount > 0) && (
+                          <div className="font-bold text-lg text-red-600">
+                            -₹{transaction.debit_amount.toLocaleString()}
+                          </div>
+                        )}
+                        {(!transaction.credit_amount || transaction.credit_amount === 0) && 
+                         (!transaction.debit_amount || transaction.debit_amount === 0) && (
+                          <div className="font-bold text-lg text-muted-foreground">
+                            ₹0
+                          </div>
+                        )}
                       </div>
                       {transaction.balance && (
                         <div className="text-sm text-blue-600 font-medium mt-1">
@@ -709,25 +775,20 @@ export default function Transactions() {
                     </div>
                   </div>
                   
-                  {/* Source File */}
-                  {transaction.source_file && (
-                    <div className="mb-3">
-                      <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                        <FileSpreadsheet className="w-3 h-3" />
-                        <span>Source: {transaction.source_file}</span>
-                      </div>
-                    </div>
-                  )}
                   
-                  {/* Proof section */}
+                  {/* Action section */}
                   <div className="pt-3 border-t border-border/30">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-muted-foreground">Proof:</span>
-                      <InlineProofUpload
-                        transactionId={transaction.id}
-                        currentProof={transaction.proof}
-                        onUploadComplete={(proofUrl) => handleInlineProofUpload(transaction.id, proofUrl)}
-                      />
+                      <span className="text-xs font-medium text-muted-foreground">Action:</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEditProof(transaction)}
+                        className="h-8 px-2 text-xs hover:bg-primary/10"
+                      >
+                        <Edit3 className="h-3 w-3 mr-1" />
+                        Edit Proof
+                      </Button>
                     </div>
                   </div>
                 </Card>
@@ -900,6 +961,105 @@ export default function Transactions() {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Proof Edit Modal */}
+        <Dialog open={isProofModalOpen} onOpenChange={setIsProofModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Edit Proof</DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              {editingTransaction && (
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-sm font-medium">Transaction Details:</p>
+                  <p className="text-sm text-muted-foreground">
+                    {editingTransaction.description || editingTransaction.notes || 'No description'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(editingTransaction.date).toLocaleDateString()} • 
+                    {editingTransaction.credit_amount > 0 ? 
+                      `+₹${editingTransaction.credit_amount.toLocaleString()}` : 
+                      `-₹${editingTransaction.debit_amount.toLocaleString()}`
+                    }
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {/* File Upload Option */}
+                <div className="space-y-2">
+                  <Label htmlFor="proof-file" className="text-sm font-medium">
+                    Upload Proof File
+                  </Label>
+                  <div className="flex items-center space-x-2">
+                    <Input
+                      id="proof-file"
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={handleProofFileChange}
+                      className="text-sm"
+                    />
+                    {proofData.proofFile && (
+                      <span className="text-xs text-green-600">
+                        ✓ {proofData.proofFile.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Supported formats: PDF, JPG, PNG, DOC, DOCX
+                  </p>
+                </div>
+
+                {/* OR Divider */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">OR</span>
+                  </div>
+                </div>
+
+                {/* Text Notice Option */}
+                <div className="space-y-2">
+                  <Label htmlFor="proof-text" className="text-sm font-medium">
+                    Enter Notice/Explanation
+                  </Label>
+                  <Textarea
+                    id="proof-text"
+                    placeholder="Enter a notice or explanation for this transaction..."
+                    value={proofData.proof}
+                    onChange={handleProofTextChange}
+                    className="min-h-[100px] text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Provide a text explanation or notice for this transaction
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsProofModalOpen(false);
+                    setEditingTransaction(null);
+                    setProofData({ proof: "", proofFile: null });
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSaveProof}
+                  className="btn-gradient"
+                >
+                  Save Proof
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
 

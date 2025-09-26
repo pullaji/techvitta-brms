@@ -221,56 +221,36 @@ class PDFParserService {
     return transactions;
   }
 
-  // Parse individual transaction line (optimized for your bank statement format)
+  // Enhanced transaction line parsing with multiple bank format support
   private parseTransactionLine(line: string): BankTransaction | null {
     try {
       console.log('Parsing transaction line:', line);
       
-      // Split by multiple spaces or tabs
-      const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+      // Try different parsing strategies based on bank format
+      const strategies = [
+        this.parseIDFCFormat.bind(this),
+        this.parseHDFCFormat.bind(this),
+        this.parseSBICFormat.bind(this),
+        this.parseICICIFormat.bind(this),
+        this.parseAxisFormat.bind(this),
+        this.parseGenericFormat.bind(this)
+      ];
       
-      console.log('Line parts:', parts);
-      
-      if (parts.length < 5) {
-        console.log('Not enough parts for transaction:', parts.length);
-        return null; // Not enough data for a transaction
+      for (const strategy of strategies) {
+        try {
+          const transaction = strategy(line);
+          if (transaction) {
+            console.log('Successfully parsed transaction:', transaction);
+            return transaction;
+          }
+        } catch (error) {
+          console.log(`Strategy failed, trying next:`, error.message);
+          continue;
+        }
       }
       
-      // Extract date (first part)
-      const dateStr = parts[0].trim();
-      const date = this.parseDate(dateStr);
-      console.log('Parsed date:', date);
-      
-      // Extract payment type (second part)
-      const paymentType = parts[1].trim();
-      console.log('Payment type:', paymentType);
-      
-      // Extract transaction name (third part)
-      const transactionName = parts[2].trim();
-      console.log('Transaction name:', transactionName);
-      
-      // Extract category (fourth part)
-      const categoryStr = parts[3].trim();
-      const category = this.determineCategory(transactionName, paymentType);
-      console.log('Category:', category, 'from category string:', categoryStr);
-      
-      // Extract amount (last part)
-      const amountStr = parts[parts.length - 1].trim();
-      const amount = this.parseAmount(amountStr);
-      const isCredit = amountStr.includes('+');
-      console.log('Amount:', amount, 'isCredit:', isCredit);
-      
-      const transaction = {
-        date,
-        paymentType,
-        transactionName,
-        category,
-        amount: Math.abs(amount),
-        isCredit
-      };
-      
-      console.log('Parsed transaction:', transaction);
-      return transaction;
+      console.log('All parsing strategies failed for line:', line);
+      return null;
       
     } catch (error) {
       console.error('Error parsing transaction line:', line, error);
@@ -278,89 +258,402 @@ class PDFParserService {
     }
   }
 
-  // Parse date string to ISO format (optimized for "15 May, 2025" format)
+  // IDFC FIRST Bank format parser
+  private parseIDFCFormat(line: string): BankTransaction | null {
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 5) return null;
+    
+    const dateStr = parts[0].trim();
+      const paymentType = parts[1].trim();
+      const transactionName = parts[2].trim();
+    const amountStr = parts[parts.length - 1].trim();
+    
+    // Validate amount format
+    if (!this.isAmount(amountStr)) return null;
+    
+    const date = this.parseDate(dateStr);
+      const amount = this.parseAmount(amountStr);
+    const isCredit = amountStr.includes('+') || amountStr.includes('Cr');
+    const category = this.determineCategory(transactionName, paymentType);
+      
+    return {
+        date,
+        paymentType,
+        transactionName,
+        category,
+        amount: Math.abs(amount),
+        isCredit
+      };
+  }
+
+  // HDFC Bank format parser
+  private parseHDFCFormat(line: string): BankTransaction | null {
+    // HDFC format: Date | Description | Ref No | Debit | Credit | Balance
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 4) return null;
+    
+    const dateStr = parts[0].trim();
+    const description = parts[1].trim();
+    const debitStr = parts[2]?.trim() || '0';
+    const creditStr = parts[3]?.trim() || '0';
+    
+    const date = this.parseDate(dateStr);
+    const debitAmount = this.parseAmount(debitStr);
+    const creditAmount = this.parseAmount(creditStr);
+    
+    if (debitAmount === 0 && creditAmount === 0) return null;
+    
+    const isCredit = creditAmount > 0;
+    const amount = isCredit ? creditAmount : debitAmount;
+    const category = this.determineCategory(description, isCredit ? 'credit' : 'debit');
+    
+    return {
+      date,
+      paymentType: isCredit ? 'credit' : 'debit',
+      transactionName: description,
+      category,
+      amount,
+      isCredit
+    };
+  }
+
+  // SBI Bank format parser
+  private parseSBICFormat(line: string): BankTransaction | null {
+    // SBI format: Date | Description | Debit | Credit | Balance
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 3) return null;
+    
+    const dateStr = parts[0].trim();
+    const description = parts[1].trim();
+    const amountStr = parts[2]?.trim() || parts[3]?.trim() || '0';
+    
+    if (!this.isAmount(amountStr)) return null;
+    
+    const date = this.parseDate(dateStr);
+    const amount = this.parseAmount(amountStr);
+    const isCredit = amountStr.includes('+') || amountStr.includes('Cr') || amountStr.includes('Credit');
+    const category = this.determineCategory(description, isCredit ? 'credit' : 'debit');
+    
+    return {
+      date,
+      paymentType: isCredit ? 'credit' : 'debit',
+      transactionName: description,
+      category,
+      amount: Math.abs(amount),
+      isCredit
+    };
+  }
+
+  // ICICI Bank format parser
+  private parseICICIFormat(line: string): BankTransaction | null {
+    // ICICI format: Date | Description | Amount | Balance
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 3) return null;
+    
+    const dateStr = parts[0].trim();
+    const description = parts[1].trim();
+    const amountStr = parts[2].trim();
+    
+    if (!this.isAmount(amountStr)) return null;
+    
+    const date = this.parseDate(dateStr);
+    const amount = this.parseAmount(amountStr);
+    const isCredit = amountStr.includes('+') || amountStr.includes('Cr');
+    const category = this.determineCategory(description, isCredit ? 'credit' : 'debit');
+    
+    return {
+      date,
+      paymentType: isCredit ? 'credit' : 'debit',
+      transactionName: description,
+      category,
+      amount: Math.abs(amount),
+      isCredit
+    };
+  }
+
+  // Axis Bank format parser
+  private parseAxisFormat(line: string): BankTransaction | null {
+    // Axis format: Date | Description | Debit | Credit | Balance
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 4) return null;
+    
+    const dateStr = parts[0].trim();
+    const description = parts[1].trim();
+    const debitStr = parts[2]?.trim() || '0';
+    const creditStr = parts[3]?.trim() || '0';
+    
+    const date = this.parseDate(dateStr);
+    const debitAmount = this.parseAmount(debitStr);
+    const creditAmount = this.parseAmount(creditStr);
+    
+    if (debitAmount === 0 && creditAmount === 0) return null;
+    
+    const isCredit = creditAmount > 0;
+    const amount = isCredit ? creditAmount : debitAmount;
+    const category = this.determineCategory(description, isCredit ? 'credit' : 'debit');
+    
+    return {
+      date,
+      paymentType: isCredit ? 'credit' : 'debit',
+      transactionName: description,
+      category,
+      amount,
+      isCredit
+    };
+  }
+
+  // Generic format parser (fallback)
+  private parseGenericFormat(line: string): BankTransaction | null {
+    const parts = line.split(/\s{2,}|\t+/).filter(part => part.trim().length > 0);
+    
+    if (parts.length < 3) return null;
+    
+    // Look for amount in any part
+    let amountStr = '';
+    let amountIndex = -1;
+    
+    for (let i = 0; i < parts.length; i++) {
+      if (this.isAmount(parts[i])) {
+        amountStr = parts[i];
+        amountIndex = i;
+        break;
+      }
+    }
+    
+    if (!amountStr) return null;
+    
+    // Assume first part is date, last part before amount is description
+    const dateStr = parts[0].trim();
+    const description = parts.slice(1, amountIndex).join(' ').trim();
+    
+    const date = this.parseDate(dateStr);
+    const amount = this.parseAmount(amountStr);
+    const isCredit = amountStr.includes('+') || amountStr.includes('Cr') || amountStr.includes('Credit');
+    const category = this.determineCategory(description, isCredit ? 'credit' : 'debit');
+    
+    return {
+      date,
+      paymentType: isCredit ? 'credit' : 'debit',
+      transactionName: description,
+      category,
+      amount: Math.abs(amount),
+      isCredit
+    };
+  }
+
+  // Enhanced date parsing for multiple bank formats
   private parseDate(dateStr: string): string {
     try {
       console.log('Parsing date:', dateStr);
       
-      // Handle your specific format: "15 May, 2025"
-      if (dateStr.includes(',')) {
-        // Remove comma and parse
-        const cleanDate = dateStr.replace(',', '');
+      // Clean the date string
+      const cleanDateStr = dateStr.trim().replace(/[^\w\s\/\-\.\,]/g, '');
+      
+      // Try different date formats commonly used by Indian banks
+      const dateFormats = [
+        // "15 May, 2025" format
+        () => {
+          if (cleanDateStr.includes(',')) {
+            const cleanDate = cleanDateStr.replace(',', '');
         const date = new Date(cleanDate);
-        if (!isNaN(date.getTime())) {
-          console.log('Parsed date successfully:', date.toISOString().split('T')[0]);
-          return date.toISOString().split('T')[0];
+            if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+          }
+          return null;
+        },
+        
+        // "15/05/2025" format
+        () => {
+          if (cleanDateStr.includes('/')) {
+            const parts = cleanDateStr.split('/');
+            if (parts.length === 3) {
+              // Try DD/MM/YYYY format
+              const date = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
+              if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+              
+              // Try MM/DD/YYYY format
+              const date2 = new Date(`${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`);
+              if (!isNaN(date2.getTime())) return date2.toISOString().split('T')[0];
+            }
+          }
+          return null;
+        },
+        
+        // "15-05-2025" format
+        () => {
+          if (cleanDateStr.includes('-')) {
+            const parts = cleanDateStr.split('-');
+            if (parts.length === 3) {
+              // Try DD-MM-YYYY format
+              const date = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
+              if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+              
+              // Try YYYY-MM-DD format
+              const date2 = new Date(`${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`);
+              if (!isNaN(date2.getTime())) return date2.toISOString().split('T')[0];
+            }
+          }
+          return null;
+        },
+        
+        // "15.05.2025" format
+        () => {
+          if (cleanDateStr.includes('.')) {
+            const parts = cleanDateStr.split('.');
+            if (parts.length === 3) {
+              // Try DD.MM.YYYY format
+              const date = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
+              if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+            }
+          }
+          return null;
+        },
+        
+        // "15 May 2025" format (without comma)
+        () => {
+          const date = new Date(cleanDateStr);
+          if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+          return null;
+        },
+        
+        // "2025-05-15" ISO format
+        () => {
+          if (cleanDateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            const date = new Date(cleanDateStr);
+            if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+          }
+          return null;
+        }
+      ];
+      
+      // Try each format
+      for (const format of dateFormats) {
+        try {
+          const result = format();
+          if (result) {
+            console.log('Parsed date successfully:', result);
+            return result;
+          }
+        } catch (error) {
+          console.log('Date format failed:', error.message);
+          continue;
         }
       }
       
-      // Handle formats like "15/05/2025" or other formats
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) {
-        console.log('Date parsing failed, using current date');
+      console.log('All date formats failed, using current date');
         return new Date().toISOString().split('T')[0];
-      }
       
-      console.log('Parsed date successfully:', date.toISOString().split('T')[0]);
-      return date.toISOString().split('T')[0];
     } catch (error) {
       console.error('Error parsing date:', dateStr, error);
       return new Date().toISOString().split('T')[0];
     }
   }
 
-  // Parse amount string to number (optimized for "+₹20,000.00" format)
+  // Enhanced amount parsing for multiple bank formats
   private parseAmount(amountStr: string): number {
     try {
       console.log('Parsing amount:', amountStr);
       
-      // Remove currency symbols, commas, and plus signs
-      const cleanAmount = amountStr.replace(/[₹,+\s]/g, '');
+      if (!amountStr || amountStr.trim() === '') {
+        return 0;
+      }
+      
+      // Remove currency symbols, commas, spaces, and other formatting
+      let cleanAmount = amountStr
+        .replace(/[₹$€£¥,+\s]/g, '') // Remove currency symbols, commas, plus signs, spaces
+        .replace(/[^\d\.\-]/g, '') // Keep only digits, dots, and minus signs
+        .trim();
+      
+      // Handle negative amounts
+      const isNegative = amountStr.includes('-') || amountStr.includes('Dr') || amountStr.includes('Debit');
+      
+      // Parse the number
       const amount = parseFloat(cleanAmount);
       
-      console.log('Parsed amount:', amount);
-      return amount;
+      if (isNaN(amount)) {
+        console.log('Amount parsing failed, returning 0');
+        return 0;
+      }
+      
+      const finalAmount = isNegative ? -Math.abs(amount) : Math.abs(amount);
+      console.log('Parsed amount:', finalAmount);
+      return finalAmount;
+      
     } catch (error) {
       console.error('Error parsing amount:', amountStr, error);
       return 0;
     }
   }
 
-  // Check if a string looks like an amount
+  // Enhanced amount detection for multiple formats
   private isAmount(str: string): boolean {
-    return /[₹$]?\d+[,.]?\d*/.test(str) || str.includes('₹') || str.includes('$');
+    if (!str || str.trim() === '') return false;
+    
+    // Check for common amount patterns
+    const amountPatterns = [
+      /^[₹$€£¥]?\s*\d+[,.]?\d*$/, // Basic amount with currency
+      /^\d+[,.]?\d*\s*[₹$€£¥]?$/, // Amount with currency at end
+      /^[+-]?\s*[₹$€£¥]?\s*\d+[,.]?\d*$/, // Amount with sign
+      /^\d+[,.]?\d*\s*[+-]?$/, // Amount with sign at end
+      /^(Cr|Dr|Credit|Debit)\s*\d+[,.]?\d*$/i, // Bank format with Cr/Dr
+      /^\d+[,.]?\d*\s*(Cr|Dr|Credit|Debit)$/i, // Bank format with Cr/Dr at end
+    ];
+    
+    return amountPatterns.some(pattern => pattern.test(str.trim()));
   }
 
-  // Determine transaction category based on name and type
+  // Enhanced category determination with bank-specific patterns
   private determineCategory(transactionName: string, paymentType: string): string {
     const name = transactionName.toLowerCase();
     const type = paymentType.toLowerCase();
     
     // Income categories
-    if (name.includes('salary') || name.includes('wage')) return 'salary';
-    if (name.includes('interest') || name.includes('dividend')) return 'investment';
-    if (name.includes('refund') || name.includes('return')) return 'refund';
-    if (type.includes('transfer') && !name.includes('to')) return 'transfer_in';
+    if (name.includes('salary') || name.includes('wage') || name.includes('payroll')) return 'salary';
+    if (name.includes('interest') || name.includes('dividend') || name.includes('fd interest')) return 'investment';
+    if (name.includes('refund') || name.includes('return') || name.includes('reversal')) return 'refund';
+    if (name.includes('credit') || name.includes('deposit') || name.includes('credit transfer')) return 'transfer_in';
+    if (name.includes('business income') || name.includes('revenue') || name.includes('sales')) return 'business_income';
+    
+    // Banking operations
+    if (name.includes('atm withdrawal') || name.includes('cash withdrawal')) return 'withdrawal';
+    if (name.includes('cash deposit') || name.includes('deposit')) return 'deposit';
+    if (name.includes('neft') || name.includes('rtgs') || name.includes('imps')) return 'bank_transfer';
+    if (name.includes('upi') || name.includes('paytm') || name.includes('phonepe') || name.includes('gpay')) return 'upi';
+    if (name.includes('cheque') || name.includes('chq')) return 'bank_transfer';
     
     // Expense categories
-    if (name.includes('food') || name.includes('restaurant') || name.includes('lunch')) return 'meals_entertainment';
-    if (name.includes('fuel') || name.includes('petrol') || name.includes('gas')) return 'fuel';
-    if (name.includes('medical') || name.includes('hospital') || name.includes('doctor')) return 'medical';
-    if (name.includes('school') || name.includes('education') || name.includes('tuition')) return 'education';
-    if (name.includes('insurance') || name.includes('premium')) return 'insurance';
-    if (name.includes('loan') || name.includes('emi')) return 'loan_payment';
-    if (name.includes('shopping') || name.includes('mall') || name.includes('store')) return 'shopping';
-    if (name.includes('entertainment') || name.includes('movie') || name.includes('game')) return 'entertainment';
-    if (name.includes('travel') || name.includes('taxi') || name.includes('uber')) return 'travel_transport';
-    if (name.includes('utility') || name.includes('electricity') || name.includes('water')) return 'utilities';
-    if (name.includes('office') || name.includes('supplies') || name.includes('stationery')) return 'office_supplies';
-    if (name.includes('software') || name.includes('subscription')) return 'software_subscriptions';
+    if (name.includes('food') || name.includes('restaurant') || name.includes('lunch') || name.includes('dining')) return 'meals_entertainment';
+    if (name.includes('fuel') || name.includes('petrol') || name.includes('gas') || name.includes('diesel')) return 'fuel';
+    if (name.includes('medical') || name.includes('hospital') || name.includes('doctor') || name.includes('pharmacy')) return 'medical';
+    if (name.includes('school') || name.includes('education') || name.includes('tuition') || name.includes('college')) return 'education';
+    if (name.includes('insurance') || name.includes('premium') || name.includes('policy')) return 'insurance';
+    if (name.includes('loan') || name.includes('emi') || name.includes('installment')) return 'loan_payment';
+    if (name.includes('shopping') || name.includes('mall') || name.includes('store') || name.includes('amazon') || name.includes('flipkart')) return 'shopping';
+    if (name.includes('entertainment') || name.includes('movie') || name.includes('game') || name.includes('netflix') || name.includes('spotify')) return 'entertainment';
+    if (name.includes('travel') || name.includes('taxi') || name.includes('uber') || name.includes('ola') || name.includes('metro')) return 'travel_transport';
+    if (name.includes('utility') || name.includes('electricity') || name.includes('water') || name.includes('gas bill') || name.includes('internet')) return 'utilities';
+    if (name.includes('office') || name.includes('supplies') || name.includes('stationery') || name.includes('equipment')) return 'office_supplies';
+    if (name.includes('software') || name.includes('subscription') || name.includes('saas') || name.includes('cloud')) return 'software_subscriptions';
+    if (name.includes('rent') || name.includes('rental') || name.includes('lease')) return 'business_expense';
+    if (name.includes('maintenance') || name.includes('repair') || name.includes('service')) return 'maintenance';
     
-    // Default categories
+    // Bank-specific patterns
+    if (name.includes('charges') || name.includes('fee') || name.includes('penalty')) return 'business_expense';
+    if (name.includes('commission') || name.includes('brokerage')) return 'business_expense';
+    if (name.includes('gst') || name.includes('tax') || name.includes('tds')) return 'business_expense';
+    
+    // Default categories based on payment type
     if (type.includes('upi')) return 'business_expense';
-    if (type.includes('transfer')) return 'transfer_out';
+    if (type.includes('transfer') && name.includes('to')) return 'transfer_out';
+    if (type.includes('transfer') && !name.includes('to')) return 'transfer_in';
     if (type.includes('withdrawal')) return 'withdrawal';
     if (type.includes('deposit')) return 'deposit';
+    if (type.includes('credit')) return 'transfer_in';
+    if (type.includes('debit')) return 'business_expense';
     
     // Default fallback
     return 'business_expense';

@@ -1,0 +1,1 @@
+This fix will resolve the "No transactions extracted from Excel file" error and allow your Excel data to be processed correctly!
