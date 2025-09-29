@@ -149,9 +149,10 @@ export default function Dashboard() {
                 </Button>
               </div>
               
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
+              <div className="h-64 sm:h-80">
+                {chartData?.categoryData && chartData.categoryData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
                     <Pie
                       data={chartData?.categoryData || []}
                       cx="50%"
@@ -160,32 +161,61 @@ export default function Dashboard() {
                       outerRadius={120}
                       paddingAngle={5}
                       dataKey="value"
+                      stroke="hsl(var(--card))"
+                      strokeWidth={3}
                     >
                       {chartData?.categoryData?.map((entry: any, index: number) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={entry.color}
+                          stroke="hsl(var(--card))"
+                          strokeWidth={2}
+                        />
                       ))}
                     </Pie>
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
+                        border: '2px solid hsl(var(--primary))',
+                        borderRadius: '12px',
                         boxShadow: 'var(--shadow-elevated)',
+                        fontSize: '14px',
+                        fontWeight: '500',
                       }}
+                      labelStyle={{
+                        color: 'hsl(var(--foreground))',
+                        fontWeight: '600',
+                        marginBottom: '8px',
+                      }}
+                      formatter={(value: number, name: string) => [
+                        `${value}%`,
+                        name
+                      ]}
                     />
-                  </PieChart>
-                </ResponsiveContainer>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Receipt className="w-8 h-8 text-primary" />
+                      </div>
+                      <h4 className="text-lg font-semibold text-foreground mb-2">No Categories Found</h4>
+                      <p className="text-muted-foreground text-sm">Upload receipts to see category breakdown</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-6">
                 {chartData?.categoryData?.map((category: any, index: number) => (
-                  <div key={index} className="flex items-center space-x-3">
+                  <div key={index} className="flex items-center space-x-3 p-3 rounded-lg bg-secondary/30">
                     <div
-                      className="w-3 h-3 rounded-full"
+                      className="w-4 h-4 rounded-full border-2 border-white shadow-sm flex-shrink-0"
                       style={{ backgroundColor: category.color }}
                     />
-                    <span className="text-sm text-muted-foreground">{category.name}</span>
-                    <span className="text-sm font-medium ml-auto">{category.value}%</span>
+                    <span className="text-sm font-medium text-foreground truncate">{category.name}</span>
+                    <span className="text-sm font-semibold text-primary ml-auto">{category.value}%</span>
                   </div>
                 ))}
               </div>
@@ -262,32 +292,89 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData?.monthlyData || []}>
+            <div className="h-64 sm:h-80">
+              {chartData?.monthlyData && chartData.monthlyData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart 
+                    data={chartData.monthlyData}
+                    margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                  >
                   <XAxis 
                     dataKey="month" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                    axisLine={true}
+                    tickLine={true}
+                    tick={{ fill: 'hsl(var(--foreground))', fontSize: 14, fontWeight: 500 }}
+                    axisLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
+                    tickLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
                   />
                   <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                    axisLine={true}
+                    tickLine={true}
+                    tick={{ fill: 'hsl(var(--foreground))', fontSize: 14, fontWeight: 500 }}
+                    axisLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
+                    tickLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
+                    tickFormatter={(value) => value.toString()}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
+                      border: '2px solid hsl(var(--primary))',
+                      borderRadius: '12px',
                       boxShadow: 'var(--shadow-elevated)',
+                      fontSize: '14px',
+                      fontWeight: '500',
                     }}
+                    labelStyle={{
+                      color: 'hsl(var(--foreground))',
+                      fontWeight: '600',
+                      marginBottom: '8px',
+                    }}
+                    formatter={(value: number, name: string) => [
+                      `${value} ${name}`,
+                      name === 'receipts' ? 'Receipts' : 'Transactions'
+                    ]}
                   />
-                  <Bar dataKey="receipts" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="transactions" fill="#10B981" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+                  <Bar 
+                    dataKey="receipts" 
+                    fill="hsl(215, 84%, 47%)" 
+                    radius={[6, 6, 0, 0]}
+                    stroke="hsl(215, 84%, 35%)"
+                    strokeWidth={2}
+                    name="receipts"
+                  />
+                  <Bar 
+                    dataKey="transactions" 
+                    fill="hsl(142, 76%, 36%)" 
+                    radius={[6, 6, 0, 0]}
+                    stroke="hsl(142, 76%, 25%)"
+                    strokeWidth={2}
+                    name="transactions"
+                  />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
+                      <TrendingUp className="w-8 h-8 text-primary" />
+                    </div>
+                    <h4 className="text-lg font-semibold text-foreground mb-2">No Data Available</h4>
+                    <p className="text-muted-foreground text-sm">Upload some transactions to see monthly trends</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Bar Chart Legend */}
+            <div className="flex flex-col sm:flex-row justify-center items-center space-y-2 sm:space-y-0 sm:space-x-6 mt-6">
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: 'hsl(215, 84%, 47%)' }}></div>
+                <span className="text-sm font-medium text-foreground">Receipts</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: 'hsl(142, 76%, 36%)' }}></div>
+                <span className="text-sm font-medium text-foreground">Transactions</span>
+              </div>
             </div>
           </Card>
         </motion.div>

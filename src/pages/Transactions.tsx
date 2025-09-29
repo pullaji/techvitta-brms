@@ -15,7 +15,10 @@ import {
   FileSpreadsheet,
   AlertCircle,
   RefreshCw,
-  Edit3
+  Edit3,
+  Eye,
+  ExternalLink,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +34,7 @@ import { SpendingChart } from "@/components/SpendingChart";
 import { transactionsAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCSV } from "@/utils/exportUtils";
+import { supabase } from "@/lib/supabase";
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -45,6 +49,38 @@ const getTypeIcon = (type: string) => {
   }
 };
 
+// Helper function to check if transaction has proof
+const hasProof = (transaction: any) => {
+  if (!transaction.proof || transaction.proof.trim().length === 0) {
+    return false;
+  }
+  
+  // Check if it's a proper proof URL (starts with http/https) or a meaningful text proof
+  const proof = transaction.proof.trim();
+  
+  // If it's a URL (starts with http/https), it's a real proof
+  if (proof.startsWith('http://') || proof.startsWith('https://')) {
+    return true;
+  }
+  
+  // If it's just a filename (like "statement.pdf"), it's not a real proof
+  if (proof.includes('.pdf') || proof.includes('.xlsx') || proof.includes('.csv') || proof.includes('Output')) {
+    return false;
+  }
+  
+  // If it's meaningful text (more than 10 characters), it's a real proof
+  if (proof.length > 10) {
+    return true;
+  }
+  
+  return false;
+};
+
+// Helper function to check if proof is an image URL
+const isImageUrl = (url: string) => {
+  return url && (url.includes('.jpg') || url.includes('.jpeg') || url.includes('.png') || url.includes('.gif') || url.includes('.webp'));
+};
+
 
 export default function Transactions() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -57,6 +93,8 @@ export default function Transactions() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
+  const [isViewProofModalOpen, setIsViewProofModalOpen] = useState(false);
+  const [viewingTransaction, setViewingTransaction] = useState<any>(null);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [proofData, setProofData] = useState({
     proof: "",
@@ -163,8 +201,40 @@ export default function Transactions() {
     }
 
     try {
-      // Here you would implement the actual proof update logic
-      // For now, we'll just show a success message
+      let proofValue = proofData.proof;
+
+      // If a file is uploaded, upload it to Supabase Storage first
+      if (proofData.proofFile) {
+        const file = proofData.proofFile;
+        const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2, 8);
+        const fileName = `proof_${timestamp}_${randomId}.${fileExt}`;
+        const filePath = `proofs/${fileName}`;
+
+        // Upload file to Supabase Storage
+        const { data, error } = await supabase.storage
+          .from('uploads')
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (error) {
+          throw new Error(`Upload failed: ${error.message}`);
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('uploads')
+          .getPublicUrl(filePath);
+
+        proofValue = publicUrl;
+      }
+
+      // Update the transaction with the proof
+      await transactionsAPI.update(editingTransaction.id, { proof: proofValue });
+
       toast({
         title: "Success!",
         description: "Proof updated successfully.",
@@ -203,6 +273,38 @@ export default function Transactions() {
       toast({
         title: "Error",
         description: "Failed to update transaction proof.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle viewing proof
+  const handleViewProof = (transaction: any) => {
+    if (transaction.proof) {
+      if (isImageUrl(transaction.proof)) {
+        // Open image in new tab
+        window.open(transaction.proof, '_blank');
+      } else {
+        // For text proof, show in modal
+        setViewingTransaction(transaction);
+        setIsViewProofModalOpen(true);
+      }
+    }
+  };
+
+  // Handle removing proof
+  const handleRemoveProof = async (transaction: any) => {
+    try {
+      await transactionsAPI.update(transaction.id, { proof: "" });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      toast({
+        title: "Success!",
+        description: "Proof removed successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: "Failed to remove proof.",
         variant: "destructive",
       });
     }
@@ -700,14 +802,38 @@ export default function Transactions() {
                         </td>
                         <td className="p-4">
                           <div className="flex justify-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEditProof(transaction)}
-                              className="h-8 w-8 p-0 hover:bg-primary/10"
-                            >
-                              <Edit3 className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                            </Button>
+                            {hasProof(transaction) ? (
+                              <div className="flex items-center space-x-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleViewProof(transaction)}
+                                  className="h-8 w-8 p-0 hover:bg-primary/10"
+                                  title="View Proof"
+                                >
+                                  <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveProof(transaction)}
+                                  className="h-8 w-8 p-0 hover:bg-destructive/10"
+                                  title="Remove Proof"
+                                >
+                                  <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditProof(transaction)}
+                                className="h-8 w-8 p-0 hover:bg-primary/10"
+                                title="Add Proof"
+                              >
+                                <Edit3 className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </motion.tr>
@@ -803,15 +929,38 @@ export default function Transactions() {
                   <div className="pt-3 border-t border-border/30">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-muted-foreground">Action:</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditProof(transaction)}
-                        className="h-8 px-2 text-xs hover:bg-primary/10"
-                      >
-                        <Edit3 className="h-3 w-3 mr-1" />
-                        Edit Proof
-                      </Button>
+                      {hasProof(transaction) ? (
+                        <div className="flex items-center space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewProof(transaction)}
+                            className="h-8 px-2 text-xs hover:bg-primary/10"
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveProof(transaction)}
+                            className="h-8 px-2 text-xs hover:bg-destructive/10"
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditProof(transaction)}
+                          className="h-8 px-2 text-xs hover:bg-primary/10"
+                        >
+                          <Edit3 className="h-3 w-3 mr-1" />
+                          Add Proof
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -1011,6 +1160,16 @@ export default function Transactions() {
                       `-₹${editingTransaction.debit_amount.toLocaleString()}`
                     }
                   </p>
+                  {editingTransaction.proof && isImageUrl(editingTransaction.proof) && (
+                    <div className="mt-2">
+                      <p className="text-xs text-muted-foreground mb-1">Current proof image:</p>
+                      <img 
+                        src={editingTransaction.proof} 
+                        alt="Current proof" 
+                        className="w-20 h-20 object-cover rounded border"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1061,6 +1220,12 @@ export default function Transactions() {
                     onChange={handleProofTextChange}
                     className="min-h-[100px] text-sm"
                   />
+                  {editingTransaction?.proof && !isImageUrl(editingTransaction.proof) && (
+                    <div className="mt-2 p-2 bg-secondary/30 rounded border text-sm">
+                      <p className="text-xs text-muted-foreground mb-1">Current proof:</p>
+                      <p className="text-sm">{editingTransaction.proof}</p>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Provide a text explanation or notice for this transaction
                   </p>
@@ -1086,6 +1251,63 @@ export default function Transactions() {
                 </Button>
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Proof View Modal */}
+        <Dialog open={isViewProofModalOpen} onOpenChange={setIsViewProofModalOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>View Proof</DialogTitle>
+            </DialogHeader>
+            
+            {viewingTransaction && (
+              <div className="space-y-4">
+                {/* Transaction Details */}
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-sm font-medium">Transaction Details:</p>
+                  <p className="text-sm text-muted-foreground">
+                    {viewingTransaction.description || viewingTransaction.notes || 'No description'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(viewingTransaction.date).toLocaleDateString()} • 
+                    {viewingTransaction.credit_amount > 0 ? 
+                      `+₹${viewingTransaction.credit_amount.toLocaleString()}` : 
+                      `-₹${viewingTransaction.debit_amount.toLocaleString()}`
+                    }
+                  </p>
+                </div>
+
+                {/* Proof Content */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">Proof Note:</Label>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-green-500" />
+                      <span className="text-sm font-medium">Text Proof</span>
+                    </div>
+                    <div className="border rounded-lg p-4 bg-secondary/20">
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                        {viewingTransaction.proof}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsViewProofModalOpen(false);
+                      setViewingTransaction(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 
