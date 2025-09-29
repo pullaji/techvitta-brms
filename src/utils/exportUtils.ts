@@ -12,6 +12,7 @@ export interface ExportTransaction {
   source_file?: string;
   source_type?: string;
   notes?: string;
+  proof?: string;
   created_at: string;
 }
 
@@ -34,25 +35,39 @@ export function exportToCSV(transactions: ExportTransaction[], filename: string 
     'Balance (₹)',
     'Source File',
     'Source Type',
-    'Notes',
+    'Proof Upload Link',
     'Created At'
   ];
 
   // Convert transactions to CSV rows
-  const csvRows = transactions.map(transaction => [
-    formatDateForCSV(transaction.date),
-    transaction.payment_type || '',
-    transaction.transaction_name || '',
-    transaction.description || '',
-    transaction.category || '',
-    transaction.credit_amount || 0,
-    transaction.debit_amount || 0,
-    transaction.balance || '',
-    transaction.source_file || '',
-    transaction.source_type || '',
-    transaction.notes || '',
-    formatDateForCSV(transaction.created_at)
-  ]);
+  const csvRows = transactions.map(transaction => {
+    // Create clickable hyperlink for proof if it exists
+    let proofLink = '';
+    if (transaction.proof) {
+      if (transaction.proof.startsWith('http://') || transaction.proof.startsWith('https://')) {
+        // For image URLs, create Excel hyperlink formula
+        proofLink = `=HYPERLINK("${transaction.proof}","View Proof")`;
+      } else {
+        // For text proof, show the text content
+        proofLink = transaction.proof;
+      }
+    }
+    
+    return [
+      formatDateForCSV(transaction.date),
+      transaction.payment_type || '',
+      transaction.transaction_name || '',
+      transaction.description || '',
+      transaction.category || '',
+      transaction.credit_amount || 0,
+      transaction.debit_amount || 0,
+      transaction.balance || '',
+      transaction.source_file || '',
+      transaction.source_type || '',
+      proofLink,
+      formatDateForCSV(transaction.created_at)
+    ];
+  });
 
   // Combine headers and rows
   const csvContent = [headers, ...csvRows]
@@ -63,11 +78,66 @@ export function exportToCSV(transactions: ExportTransaction[], filename: string 
   downloadFile(csvContent, filename, 'text/csv');
 }
 
-// Convert transactions to Excel format (using CSV with .xlsx extension for simplicity)
+// Convert transactions to Excel format with clickable hyperlinks
 export function exportToExcel(transactions: ExportTransaction[], filename: string = 'transactions.xlsx'): void {
-  // For now, we'll export as CSV with .xlsx extension
-  // In a real implementation, you would use a library like 'xlsx' to create actual Excel files
-  exportToCSV(transactions, filename.replace('.xlsx', '.csv'));
+  if (transactions.length === 0) {
+    console.warn('No transactions to export');
+    return;
+  }
+
+  // Define CSV headers
+  const headers = [
+    'Date',
+    'Payment Type',
+    'Transaction Name',
+    'Description',
+    'Category',
+    'Credit Amount (₹)',
+    'Debit Amount (₹)',
+    'Balance (₹)',
+    'Source File',
+    'Source Type',
+    'Proof Upload Link',
+    'Created At'
+  ];
+
+  // Convert transactions to CSV rows with Excel hyperlinks
+  const csvRows = transactions.map(transaction => {
+    // Create clickable hyperlink for proof if it exists
+    let proofLink = '';
+    if (transaction.proof) {
+      if (transaction.proof.startsWith('http://') || transaction.proof.startsWith('https://')) {
+        // For image URLs, create Excel hyperlink formula
+        proofLink = `=HYPERLINK("${transaction.proof}","View Proof")`;
+      } else {
+        // For text proof, show the text content
+        proofLink = transaction.proof;
+      }
+    }
+    
+    return [
+      formatDateForCSV(transaction.date),
+      transaction.payment_type || '',
+      transaction.transaction_name || '',
+      transaction.description || '',
+      transaction.category || '',
+      transaction.credit_amount || 0,
+      transaction.debit_amount || 0,
+      transaction.balance || '',
+      transaction.source_file || '',
+      transaction.source_type || '',
+      proofLink,
+      formatDateForCSV(transaction.created_at)
+    ];
+  });
+
+  // Combine headers and rows
+  const csvContent = [headers, ...csvRows]
+    .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  // Create and download file with .xlsx extension for Excel compatibility
+  downloadFile(csvContent, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
 // Format date for CSV export

@@ -33,7 +33,7 @@ import { InlineProofUpload } from "@/components/InlineProofUpload";
 import { SpendingChart } from "@/components/SpendingChart";
 import { transactionsAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
-import { exportToCSV } from "@/utils/exportUtils";
+import { exportToCSV, exportToExcel } from "@/utils/exportUtils";
 import { supabase } from "@/lib/supabase";
 
 const getTypeIcon = (type: string) => {
@@ -321,12 +321,12 @@ export default function Transactions() {
       return;
     }
 
-    const filename = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
-    exportToCSV(transactions, filename);
+    const filename = `transactions_${new Date().toISOString().split('T')[0]}.xlsx`;
+    exportToExcel(transactions, filename);
     
     toast({
       title: "Export successful!",
-      description: `Transactions exported to ${filename}`,
+      description: `Transactions exported to ${filename} with clickable proof links`,
     });
   };
 
@@ -500,8 +500,8 @@ export default function Transactions() {
                   onClick={handleExportCSV}
                 >
                   <FileSpreadsheet className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Export CSV</span>
-                  <span className="sm:hidden">CSV</span>
+                  <span className="hidden sm:inline">Export Excel</span>
+                  <span className="sm:hidden">Excel</span>
                 </Button>
               </div>
               <Button className="btn-gradient w-full sm:w-auto text-sm" onClick={() => setIsAddModalOpen(true)}>
