@@ -14,7 +14,6 @@ import {
   FileText,
   FileSpreadsheet,
   AlertCircle,
-  RefreshCw,
   Edit3,
   Eye,
   ExternalLink,
@@ -115,14 +114,6 @@ export default function Transactions() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Refresh transactions function
-  const refreshTransactions = () => {
-    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    toast({
-      title: "Refreshing...",
-      description: "Transactions are being refreshed.",
-    });
-  };
 
   // Create transaction mutation
   const createTransactionMutation = useMutation({
@@ -321,8 +312,33 @@ export default function Transactions() {
       return;
     }
 
+    // Convert transaction data to the format expected by export function
+    const exportData = transactions.map(t => ({
+      date: t.date,
+      payment_type: t.payment_type,
+      transaction_name: t.transaction_name,
+      description: t.description,
+      category: t.category,
+      credit_amount: t.credit_amount || 0,
+      debit_amount: t.debit_amount || 0,
+      balance: t.balance,
+      source_file: t.source_file,
+      source_type: t.source_type,
+      notes: t.notes,
+      proof: t.proof,
+      created_at: t.created_at
+    }));
+
+    // Debug: Log export data
+    console.log('📊 Export Data Debug:', {
+      totalTransactions: transactions.length,
+      exportDataLength: exportData.length,
+      sampleTransaction: transactions[0],
+      sampleExportData: exportData[0]
+    });
+
     const filename = `transactions_${new Date().toISOString().split('T')[0]}.xlsx`;
-    exportToExcel(transactions, filename);
+    exportToExcel(exportData, filename);
     
     toast({
       title: "Export successful!",
@@ -485,15 +501,6 @@ export default function Transactions() {
               className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-4 sm:mt-0"
             >
               <div className="flex space-x-2">
-                <Button 
-                  variant="outline" 
-                  className="w-full sm:w-auto text-sm"
-                  onClick={refreshTransactions}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Refresh</span>
-                  <span className="sm:hidden">Refresh</span>
-                </Button>
                 <Button 
                   variant="outline" 
                   className="w-full sm:w-auto text-sm"

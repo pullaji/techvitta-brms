@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import { reportsAPI, transactionsAPI, dashboardAPI } from "@/services/supabaseApi";
 import { supabase } from "@/lib/supabase";
+import { downloadTaxSummaryPDF, downloadTaxSummaryHTML, type TaxSummaryData } from "@/utils/pdfGenerator";
 
 const reportTypes = [
   {
@@ -75,8 +76,21 @@ export default function Reports() {
 
   const { data: allTransactions } = useQuery({
     queryKey: ['all-transactions'],
-    queryFn: () => transactionsAPI.getAll({}),
+    queryFn: () => transactionsAPI.getAll({ showAll: true }),
   });
+
+  // Debug: Log transaction data to console
+  React.useEffect(() => {
+    if (allTransactions && allTransactions.length > 0) {
+      console.log('📊 Transaction Data Debug:', {
+        totalTransactions: allTransactions.length,
+        sampleTransaction: allTransactions[0],
+        categories: [...new Set(allTransactions.map(t => t.category))],
+        statuses: [...new Set(allTransactions.map(t => t.status))],
+        totalDebitAmount: allTransactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0)
+      });
+    }
+  }, [allTransactions]);
 
   // Fetch recent reports
   const { data: recentReportsData, refetch: refetchReports } = useQuery({
@@ -119,6 +133,70 @@ export default function Reports() {
     generateReportMutation.mutate({ type: reportType, params });
   };
 
+  const handleGenerateTaxSummaryPDF = async () => {
+    if (!allTransactions || allTransactions.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No transactions found to generate tax summary.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Calculate tax summary data
+    const deductibleCategories = [
+      'business_expense', 
+      'travel_transport', 
+      'meals_entertainment', 
+      'office_supplies', 
+      'software_subscriptions', 
+      'utilities',
+      'medical',
+      'education',
+      'insurance',
+      'fuel',
+      'maintenance'
+    ];
+    const deductibleTransactions = allTransactions.filter((t: any) => 
+      deductibleCategories.includes(t.category)
+    );
+    
+    const deductibleAmount = deductibleTransactions.reduce((sum: number, t: any) => sum + (t.debit_amount || 0), 0);
+    const taxSavings = deductibleAmount * 0.3;
+    
+    const categoryBreakdown = allTransactions.reduce((acc: any, t: any) => {
+      acc[t.category] = (acc[t.category] || 0) + (t.debit_amount || 0);
+      return acc;
+    }, {});
+
+    const taxSummaryData: TaxSummaryData = {
+      title: "Tax Summary Report",
+      generatedAt: new Date().toLocaleDateString(),
+      period: `${selectedPeriod} (${new Date().getFullYear()})`,
+      summary: {
+        totalTransactions: allTransactions.length,
+        totalAmount: allTransactions.reduce((sum: number, t: any) => sum + (t.debit_amount || 0), 0),
+        deductibleAmount: deductibleAmount,
+        taxSavings: taxSavings
+      },
+      categoryBreakdown: categoryBreakdown,
+      deductibleTransactions: deductibleTransactions.map((t: any) => ({
+        transaction_date: t.date,
+        notes: t.notes,
+        category: t.category,
+        amount: t.debit_amount || 0
+      }))
+    };
+
+    // Generate and download PDF
+    downloadTaxSummaryPDF(taxSummaryData, `tax-summary-${new Date().toISOString().split('T')[0]}.pdf`);
+    
+    toast({
+      title: "Tax Summary Generated",
+      description: "Your tax summary PDF is being generated and downloaded.",
+    });
+  };
+
   const handleDownloadReport = async (report: any) => {
     try {
       // Get the actual report data from database
@@ -137,45 +215,51 @@ export default function Reports() {
         return;
       }
 
-      // Parse the report data
-      const reportContent = JSON.parse(atob(reportData.file_url.split(',')[1]));
-      
-      // Create downloadable content based on format
-      let content, mimeType, extension;
-      
-      if (report.format === 'CSV') {
-        const headers = ['Date', 'Notes', 'Category', 'Amount', 'Type', 'Status'];
-        const csvContent = [
-          headers.join(','),
-          ...reportContent.data.transactions.map((t: any) => [
-            t.transaction_date,
-            `"${t.notes || 'No notes'}"`,
-            t.category,
-            t.amount,
-            t.transaction_type,
-            t.status
-          ].join(','))
-        ].join('\n');
-        content = csvContent;
-        mimeType = 'text/csv';
-        extension = 'csv';
+      // Handle different report formats
+      if (report.format === 'PDF' && report.type === 'tax_summary') {
+        // Parse the stored data and generate proper PDF
+        const base64Data = reportData.file_url.split(',')[1];
+        const reportContent = JSON.parse(atob(base64Data));
+        
+        // Convert to TaxSummaryData format
+        const taxSummaryData: TaxSummaryData = {
+          title: reportContent.title || "Tax Summary Report",
+          generatedAt: reportContent.generatedAt || new Date().toLocaleDateString(),
+          period: reportContent.period || "N/A",
+          summary: reportContent.summary,
+          categoryBreakdown: reportContent.categoryBreakdown,
+          deductibleTransactions: reportContent.deductibleTransactions
+        };
+        
+        // Generate and download PDF
+        downloadTaxSummaryPDF(taxSummaryData, `${report.name}.pdf`);
+        
       } else {
-        // Default to JSON format
-        content = JSON.stringify(reportContent, null, 2);
-        mimeType = 'application/json';
-        extension = 'json';
-      }
+        // Handle other formats (CSV, JSON)
+        const base64Data = reportData.file_url.split(',')[1];
+        const content = atob(base64Data);
+        
+        // Determine mime type and extension from the stored format
+        let mimeType, extension;
+        if (reportData.file_url.includes('text/csv')) {
+          mimeType = 'text/csv';
+          extension = 'csv';
+        } else {
+          mimeType = 'application/json';
+          extension = 'json';
+        }
 
-      // Create and download file
-      const blob = new Blob([content], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${report.name}.${extension}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+        // Create and download file
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${report.name}.${extension}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
       
       toast({
         title: "Download Started",
@@ -350,27 +434,61 @@ export default function Reports() {
                             </div>
                           </div>
                           
-                          <Button
-                            onClick={() => handleGenerateReport(report.id)}
-                            disabled={isGenerating !== null}
-                            className="btn-gradient"
-                          >
-                            {isGeneratingThis ? (
-                              <>
-                                <motion.div
-                                  animate={{ rotate: 360 }}
-                                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"
-                                />
-                                Generating...
-                              </>
-                            ) : (
-                              <>
-                                <Download className="w-4 h-4 mr-2" />
-                                Generate
-                              </>
-                            )}
-                          </Button>
+                          {report.id === 'tax_summary' ? (
+                            <div className="space-y-2">
+                              <Button
+                                onClick={() => handleGenerateReport(report.id)}
+                                disabled={isGenerating !== null}
+                                className="btn-gradient w-full"
+                              >
+                                {isGeneratingThis ? (
+                                  <>
+                                    <motion.div
+                                      animate={{ rotate: 360 }}
+                                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                                      className="w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"
+                                    />
+                                    Generating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Generate {selectedFormat}
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                onClick={handleGenerateTaxSummaryPDF}
+                                variant="outline"
+                                className="w-full"
+                              >
+                                <FileText className="w-4 h-4 mr-2" />
+                                Quick Tax PDF
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              onClick={() => handleGenerateReport(report.id)}
+                              disabled={isGenerating !== null}
+                              className="btn-gradient"
+                            >
+                              {isGeneratingThis ? (
+                                <>
+                                  <motion.div
+                                    animate={{ rotate: 360 }}
+                                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                                    className="w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"
+                                  />
+                                  Generating...
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Generate
+                                </>
+                              )}
+                            </Button>
+                          )}
                         </div>
                       </motion.div>
                     );
@@ -389,29 +507,61 @@ export default function Reports() {
                 <h3 className="heading-md text-xl mb-6">Current Period Overview</h3>
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600">
-                      ₹{allTransactions?.reduce((sum: number, t: any) => sum + t.amount, 0)?.toLocaleString() || '0'}
+                  <div className="text-center p-4 bg-blue-50 rounded-xl border border-blue-100 shadow-sm">
+                    <div className="text-sm sm:text-lg md:text-xl font-bold text-blue-700 mb-2 break-words leading-tight">
+                      ₹{allTransactions?.reduce((sum: number, t: any) => sum + (t.debit_amount || 0), 0)?.toLocaleString('en-IN') || '0'}
                     </div>
-                    <div className="text-sm text-blue-600/80">Total Expenses</div>
+                    <div className="text-xs font-medium text-blue-600/90 uppercase tracking-wide">Total Expenses</div>
                   </div>
-                  <div className="text-center p-4 bg-green-50 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">
+                  <div className="text-center p-4 bg-green-50 rounded-xl border border-green-100 shadow-sm">
+                    <div className="text-2xl font-bold text-green-700 mb-2">
                       {allTransactions?.length || 0}
                     </div>
-                    <div className="text-sm text-green-600/80">Receipts</div>
+                    <div className="text-xs font-medium text-green-600/90 uppercase tracking-wide">Receipts</div>
                   </div>
-                  <div className="text-center p-4 bg-purple-50 rounded-lg">
-                    <div className="text-2xl font-bold text-purple-600">
-                      ₹{Math.round((allTransactions?.reduce((sum: number, t: any) => sum + t.amount, 0) || 0) * 0.3).toLocaleString()}
+                  <div className="text-center p-4 bg-purple-50 rounded-xl border border-purple-100 shadow-sm">
+                    <div className="text-sm sm:text-lg md:text-xl font-bold text-purple-700 mb-2 break-words leading-tight">
+                      ₹{(() => {
+                        const deductibleCategories = [
+                          'business_expense', 
+                          'travel_transport', 
+                          'meals_entertainment', 
+                          'office_supplies', 
+                          'software_subscriptions', 
+                          'utilities',
+                          'medical',
+                          'education',
+                          'insurance',
+                          'fuel',
+                          'maintenance'
+                        ];
+                        const deductibleAmount = allTransactions?.filter((t: any) => 
+                          deductibleCategories.includes(t.category)
+                        ).reduce((sum: number, t: any) => sum + (t.debit_amount || 0), 0) || 0;
+                        return deductibleAmount.toLocaleString('en-IN');
+                      })()}
                     </div>
-                    <div className="text-sm text-purple-600/80">Tax Deductible</div>
+                    <div className="text-xs font-medium text-purple-600/90 uppercase tracking-wide">Tax Deductible</div>
                   </div>
-                  <div className="text-center p-4 bg-orange-50 rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600">
-                      {allTransactions ? Math.round((allTransactions.filter((t: any) => t.status === 'processed').length / allTransactions.length) * 100) : 0}%
+                  <div className="text-center p-4 bg-orange-50 rounded-xl border border-orange-100 shadow-sm">
+                    <div className="text-2xl font-bold text-orange-700 mb-2">
+                      {allTransactions ? (() => {
+                        const processedCount = allTransactions.filter((t: any) => 
+                          t.status === 'processed' || 
+                          t.status === 'completed' || 
+                          t.status === 'verified' ||
+                          (t.category && t.category !== 'uncategorized')
+                        ).length;
+                        
+                        // If no status field exists, assume all transactions with categories are processed
+                        if (processedCount === 0 && allTransactions.some(t => t.category)) {
+                          return Math.round((allTransactions.filter(t => t.category).length / allTransactions.length) * 100);
+                        }
+                        
+                        return Math.round((processedCount / allTransactions.length) * 100);
+                      })() : 0}%
                     </div>
-                    <div className="text-sm text-orange-600/80">Processed</div>
+                    <div className="text-xs font-medium text-orange-600/90 uppercase tracking-wide">Processed</div>
                   </div>
                 </div>
               </Card>

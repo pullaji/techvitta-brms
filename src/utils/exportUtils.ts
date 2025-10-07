@@ -34,8 +34,8 @@ export function exportToCSV(transactions: ExportTransaction[], filename: string 
     'Debit Amount (₹)',
     'Balance (₹)',
     'Source File',
-    'Source Type',
     'Proof Upload Link',
+    'Notes',
     'Created At'
   ];
 
@@ -63,8 +63,8 @@ export function exportToCSV(transactions: ExportTransaction[], filename: string 
       transaction.debit_amount || 0,
       transaction.balance || '',
       transaction.source_file || '',
-      transaction.source_type || '',
       proofLink,
+      transaction.notes || '',
       formatDateForCSV(transaction.created_at)
     ];
   });
@@ -85,59 +85,158 @@ export function exportToExcel(transactions: ExportTransaction[], filename: strin
     return;
   }
 
-  // Define CSV headers
-  const headers = [
-    'Date',
-    'Payment Type',
-    'Transaction Name',
-    'Description',
-    'Category',
-    'Credit Amount (₹)',
-    'Debit Amount (₹)',
-    'Balance (₹)',
-    'Source File',
-    'Source Type',
-    'Proof Upload Link',
-    'Created At'
-  ];
+  try {
+    // Import xlsx dynamically
+    import('xlsx').then((XLSX) => {
+      // Define headers
+      const headers = [
+        'Date',
+        'Payment Type',
+        'Transaction Name',
+        'Description',
+        'Category',
+        'Credit Amount (₹)',
+        'Debit Amount (₹)',
+        'Balance (₹)',
+        'Source File',
+        'Proof Upload Link',
+        'Notes',
+        'Created At'
+      ];
 
-  // Convert transactions to CSV rows with Excel hyperlinks
-  const csvRows = transactions.map(transaction => {
-    // Create clickable hyperlink for proof if it exists
-    let proofLink = '';
-    if (transaction.proof) {
-      if (transaction.proof.startsWith('http://') || transaction.proof.startsWith('https://')) {
-        // For image URLs, create Excel hyperlink formula
-        proofLink = `=HYPERLINK("${transaction.proof}","View Proof")`;
-      } else {
-        // For text proof, show the text content
-        proofLink = transaction.proof;
+      // Convert transactions to Excel rows
+      const excelRows = transactions.map(transaction => {
+        // Create clickable hyperlink for proof if it exists
+        let proofLink = '';
+        if (transaction.proof) {
+          const proof = transaction.proof.trim();
+          
+          if (proof.startsWith('http://') || proof.startsWith('https://')) {
+            // For web URLs, create Excel hyperlink formula
+            proofLink = `=HYPERLINK("${proof}","View Proof")`;
+          } else if (proof.includes('.pdf') || proof.includes('.jpg') || proof.includes('.jpeg') || 
+                     proof.includes('.png') || proof.includes('.gif') || proof.includes('.webp') ||
+                     proof.includes('.doc') || proof.includes('.docx') || proof.includes('.xlsx') ||
+                     proof.includes('.csv') || proof.includes('.txt')) {
+            // For file names with extensions, create a hyperlink
+            if (proof.startsWith('/') || proof.includes('\\')) {
+              proofLink = `=HYPERLINK("${proof}","View Proof")`;
+            } else {
+              proofLink = `=HYPERLINK("${proof}","View Proof - Check file location")`;
+            }
+          } else if (proof.includes('supabase') || proof.includes('storage')) {
+            // For Supabase storage URLs, create hyperlink
+            proofLink = `=HYPERLINK("${proof}","View Proof")`;
+          } else if (proof.length > 10 && !proof.includes('Output') && !proof.includes('statement')) {
+            // For meaningful text proof, show the text content
+            proofLink = proof;
+          } else {
+            // For short or system-generated text, show as is
+            proofLink = proof || 'No proof available';
+          }
+        } else {
+          proofLink = 'No proof available';
+        }
+        
+        return [
+          formatDateForCSV(transaction.date),
+          transaction.payment_type || '',
+          transaction.transaction_name || '',
+          transaction.description || '',
+          transaction.category || '',
+          transaction.credit_amount || 0,
+          transaction.debit_amount || 0,
+          transaction.balance || '',
+          transaction.source_file || '',
+          proofLink,
+          transaction.notes || '',
+          formatDateForCSV(transaction.created_at)
+        ];
+      });
+
+      // Create worksheet data
+      const worksheetData = [headers, ...excelRows];
+
+      // Create workbook and worksheet
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+
+       // Set column widths
+       const columnWidths = [
+         { wch: 12 }, // Date
+         { wch: 15 }, // Payment Type
+         { wch: 25 }, // Transaction Name
+         { wch: 30 }, // Description
+         { wch: 20 }, // Category
+         { wch: 15 }, // Credit Amount
+         { wch: 15 }, // Debit Amount
+         { wch: 15 }, // Balance
+         { wch: 20 }, // Source File
+         { wch: 25 }, // Proof Link
+         { wch: 30 }, // Notes
+         { wch: 15 }  // Created At
+       ];
+      worksheet['!cols'] = columnWidths;
+
+      // Add hyperlink formatting for proof links
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      for (let row = 1; row <= range.e.r; row++) {
+        const proofCell = XLSX.utils.encode_cell({ r: row, c: 9 }); // Column J (Proof Upload Link)
+        if (worksheet[proofCell] && worksheet[proofCell].v && worksheet[proofCell].v.includes('=HYPERLINK')) {
+          // Set hyperlink cell style
+          if (!worksheet[proofCell].s) worksheet[proofCell].s = {};
+          worksheet[proofCell].s.font = { 
+            color: { rgb: "0000FF" }, 
+            underline: true,
+            bold: false
+          };
+          // Add hyperlink property for better Excel compatibility
+          worksheet[proofCell].l = {
+            Target: worksheet[proofCell].v.match(/HYPERLINK\("([^"]+)"/)?.[1] || '',
+            Tooltip: 'Click to open proof document'
+          };
+        }
       }
-    }
-    
-    return [
-      formatDateForCSV(transaction.date),
-      transaction.payment_type || '',
-      transaction.transaction_name || '',
-      transaction.description || '',
-      transaction.category || '',
-      transaction.credit_amount || 0,
-      transaction.debit_amount || 0,
-      transaction.balance || '',
-      transaction.source_file || '',
-      transaction.source_type || '',
-      proofLink,
-      formatDateForCSV(transaction.created_at)
-    ];
-  });
 
-  // Combine headers and rows
-  const csvContent = [headers, ...csvRows]
-    .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(','))
-    .join('\n');
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
 
-  // Create and download file with .xlsx extension for Excel compatibility
-  downloadFile(csvContent, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      // Debug: Log hyperlink information
+      console.log('📊 Excel Export Debug:', {
+        totalTransactions: transactions.length,
+        hyperlinkCount: excelRows.filter(row => row[9] && row[9].includes('=HYPERLINK')).length,
+        sampleHyperlink: excelRows.find(row => row[9] && row[9].includes('=HYPERLINK'))?.[9]
+      });
+
+      // Generate Excel file
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+      // Create and download file
+      const blob = new Blob([excelBuffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.style.display = 'none';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      URL.revokeObjectURL(url);
+    }).catch((error) => {
+      console.error('Error loading xlsx library:', error);
+      // Fallback to CSV export
+      exportToCSV(transactions, filename.replace('.xlsx', '.csv'));
+    });
+  } catch (error) {
+    console.error('Error exporting to Excel:', error);
+    // Fallback to CSV export
+    exportToCSV(transactions, filename.replace('.xlsx', '.csv'));
+  }
 }
 
 // Format date for CSV export

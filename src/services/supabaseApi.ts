@@ -1243,6 +1243,112 @@ export const uploadAPI = {
   }
 };
 
+// Helper functions for report generation
+function generateTaxSummaryPDF(reportData: any): string {
+  const { data } = reportData;
+  const { summary, transactions } = data;
+  
+  // Calculate tax-deductible amounts
+  const deductibleCategories = [
+    'business_expense', 
+    'travel_transport', 
+    'meals_entertainment', 
+    'office_supplies', 
+    'software_subscriptions', 
+    'utilities',
+    'medical',
+    'education',
+    'insurance',
+    'fuel',
+    'maintenance'
+  ];
+  const deductibleAmount = transactions
+    .filter((t: any) => deductibleCategories.includes(t.category))
+    .reduce((sum: number, t: any) => sum + (t.debit_amount || 0), 0);
+  
+  const taxSavings = deductibleAmount * 0.3; // Assuming 30% tax rate
+  
+  // Generate structured data for PDF conversion
+  const pdfData = {
+    title: "Tax Summary Report",
+    generatedAt: new Date(reportData.generatedAt).toLocaleDateString(),
+    period: `${summary.period} (${summary.dateRange.start} to ${summary.dateRange.end})`,
+    summary: {
+      totalTransactions: summary.totalTransactions,
+      totalAmount: summary.totalAmount,
+      deductibleAmount: deductibleAmount,
+      taxSavings: taxSavings
+    },
+    categoryBreakdown: summary.categoryBreakdown,
+    deductibleTransactions: transactions.filter((t: any) => deductibleCategories.includes(t.category))
+  };
+  
+  return JSON.stringify(pdfData, null, 2);
+}
+
+function generateReportPDF(reportData: any): string {
+  const { data } = reportData;
+  const { summary, transactions } = data;
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>${reportData.name}</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .summary-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .summary-table th, .summary-table td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        .summary-table th { background-color: #f2f2f2; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>${reportData.name}</h1>
+        <p>Generated on: ${new Date(reportData.generatedAt).toLocaleDateString()}</p>
+      </div>
+      
+      <div class="section">
+        <h2>Summary</h2>
+        <table class="summary-table">
+          <tr><th>Total Transactions</th><td>${summary.totalTransactions}</td></tr>
+          <tr><th>Total Amount</th><td>₹${summary.totalAmount.toLocaleString()}</td></tr>
+        </table>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  return htmlContent;
+}
+
+function generateReportCSV(reportData: any): string {
+  const { data } = reportData;
+  const { summary, transactions } = reportData.data;
+  
+  const headers = ['Date', 'Description', 'Category', 'Amount', 'Type'];
+  const rows = transactions.map((t: any) => [
+    t.transaction_date,
+    `"${(t.notes || '').replace(/"/g, '""')}"`,
+    t.category,
+    t.amount,
+    t.transaction_type
+  ]);
+  
+  const csvContent = [
+    ['Report Summary', ''],
+    ['Total Transactions', summary.totalTransactions],
+    ['Total Amount', summary.totalAmount],
+    ['Period', summary.period],
+    ['', ''],
+    ...headers,
+    ...rows
+  ].map(row => row.join(',')).join('\n');
+  
+  return csvContent;
+}
+
 // Reports API
 export const reportsAPI = {
   async generate(type: string, params: any) {
@@ -1261,31 +1367,31 @@ export const reportsAPI = {
     if (params.period === 'monthly') {
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       filteredTransactions = transactions?.filter(t => 
-        new Date(t.transaction_date) >= startOfMonth
+        new Date(t.date) >= startOfMonth
       ) || [];
     } else if (params.period === 'quarterly') {
       const startOfQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
       filteredTransactions = transactions?.filter(t => 
-        new Date(t.transaction_date) >= startOfQuarter
+        new Date(t.date) >= startOfQuarter
       ) || [];
     } else if (params.period === 'yearly') {
       const startOfYear = new Date(now.getFullYear(), 0, 1);
       filteredTransactions = transactions?.filter(t => 
-        new Date(t.transaction_date) >= startOfYear
+        new Date(t.date) >= startOfYear
       ) || [];
     } else if (params.period === 'custom' && params.startDate && params.endDate) {
       filteredTransactions = transactions?.filter(t => {
-        const transactionDate = new Date(t.transaction_date);
+        const transactionDate = new Date(t.date);
         return transactionDate >= new Date(params.startDate) && 
                transactionDate <= new Date(params.endDate);
       }) || [];
     }
 
     // Calculate report statistics
-    const totalAmount = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const totalAmount = filteredTransactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0);
     const totalTransactions = filteredTransactions.length;
     const categoryBreakdown = filteredTransactions.reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + t.amount;
+      acc[t.category] = (acc[t.category] || 0) + (t.debit_amount || 0);
       return acc;
     }, {} as Record<string, number>);
 
@@ -1305,19 +1411,42 @@ export const reportsAPI = {
           categoryBreakdown,
           period: params.period,
           dateRange: {
-            start: params.startDate || (filteredTransactions[0]?.transaction_date),
-            end: params.endDate || (filteredTransactions[filteredTransactions.length - 1]?.transaction_date)
+            start: params.startDate || (filteredTransactions[0]?.date),
+            end: params.endDate || (filteredTransactions[filteredTransactions.length - 1]?.date)
           }
         }
       }
     };
+
+    // Generate proper format based on request
+    let fileContent, mimeType;
+    
+    if (params.format?.toUpperCase() === 'PDF') {
+      // Generate PDF content for tax summary
+      if (type === 'tax_summary') {
+        fileContent = generateTaxSummaryPDF(reportData);
+        mimeType = 'application/pdf';
+      } else {
+        // For other reports, generate PDF
+        fileContent = generateReportPDF(reportData);
+        mimeType = 'application/pdf';
+      }
+    } else if (params.format?.toUpperCase() === 'CSV') {
+      // Generate CSV content
+      fileContent = generateReportCSV(reportData);
+      mimeType = 'text/csv';
+    } else {
+      // Default to JSON
+      fileContent = JSON.stringify(reportData, null, 2);
+      mimeType = 'application/json';
+    }
 
     // Save report to database
     const { data: savedReport, error: saveError } = await supabase
       .from('reports')
       .insert({
         report_type: type,
-        file_url: `data:application/json;base64,${btoa(JSON.stringify(reportData))}`,
+        file_url: `data:${mimeType};base64,${btoa(fileContent)}`,
         created_at: new Date().toISOString()
       })
       .select()
@@ -1346,14 +1475,20 @@ export const reportsAPI = {
     }
 
     // Transform database reports to match expected format
-    return reports?.map(report => ({
-      id: report.id,
-      name: `${report.report_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} - ${new Date(report.created_at).toLocaleDateString()}`,
-      type: report.report_type,
-      generatedAt: report.created_at,
-      size: "Generated",
-      format: "JSON"
-    })) || [];
+    return reports?.map(report => {
+      // Extract format from file_url
+      const format = report.file_url.includes('application/pdf') ? 'PDF' : 
+                    report.file_url.includes('text/csv') ? 'CSV' : 'JSON';
+      
+      return {
+        id: report.id,
+        name: `${report.report_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} - ${new Date(report.created_at).toLocaleDateString()}`,
+        type: report.report_type,
+        generatedAt: report.created_at,
+        size: "Generated",
+        format: format
+      };
+    }) || [];
   }
 };
 
