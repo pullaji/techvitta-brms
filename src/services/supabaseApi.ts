@@ -1349,6 +1349,121 @@ function generateReportCSV(reportData: any): string {
   return csvContent;
 }
 
+// Saved Reports API - for saving filtered transactions
+export const savedReportsAPI = {
+  async saveFilteredTransactions(transactions: any[], filters: any, reportName: string) {
+    try {
+      const reportData: any = {
+        report_name: reportName || `Saved Report - ${new Date().toLocaleDateString()}`,
+        report_type: 'filtered_transactions',
+        transaction_ids: transactions.map(t => t.id),
+        filters_applied: filters,
+        total_transactions: transactions.length,
+        total_credits: transactions.reduce((sum, t) => sum + (t.credit_amount || 0), 0),
+        total_debits: transactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0),
+        date_range: {
+          start: transactions.length > 0 ? new Date(Math.min(...transactions.map(t => new Date(t.date).getTime()))).toISOString().split('T')[0] : null,
+          end: transactions.length > 0 ? new Date(Math.max(...transactions.map(t => new Date(t.date).getTime()))).toISOString().split('T')[0] : null
+        },
+        created_by: (await supabase.auth.getUser()).data.user?.id
+      };
+
+      // Only add PDF fields if they exist in the table
+      if (filters.pdfUrl) {
+        reportData.pdf_url = filters.pdfUrl;
+      }
+      if (filters.pdfFilename) {
+        reportData.pdf_filename = filters.pdfFilename;
+      }
+
+      const { data, error } = await supabase
+        .from('saved_reports')
+        .insert(reportData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving filtered transactions report:', error);
+        
+        // Check if it's a table not found error
+        if (error.message?.includes('relation "public.saved_reports" does not exist') || 
+            error.message?.includes('Could not find the table')) {
+          throw new Error('Database table not found. Please run the database setup script to create the saved_reports table.');
+        }
+        
+        // Check if it's a column not found error
+        if (error.message?.includes('column') && error.message?.includes('does not exist')) {
+          throw new Error('Database schema outdated. Please run the database migration script to add missing columns.');
+        }
+        
+        throw error;
+      }
+
+      // Log audit
+      await auditAPI.logAction('save', `Saved filtered transactions report: ${reportName} with ${transactions.length} transactions`, 'admin');
+
+      return data;
+    } catch (error) {
+      console.error('Error in saveFilteredTransactions:', error);
+      throw error;
+    }
+  },
+
+  async getAll() {
+    const { data, error } = await supabase
+      .from('saved_reports')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      // If table doesn't exist, return empty array instead of throwing error
+      if (error.message?.includes('relation "public.saved_reports" does not exist') || 
+          error.message?.includes('Could not find the table')) {
+        console.warn('saved_reports table does not exist yet. Please run the database setup script.');
+        return [];
+      }
+      throw error;
+    }
+    return data || [];
+  },
+
+  async getById(id: string) {
+    const { data, error } = await supabase
+      .from('saved_reports')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async getTransactionsByReportId(reportId: string) {
+    const report = await this.getById(reportId);
+    if (!report) throw new Error('Report not found');
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .in('id', report.transaction_ids);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('saved_reports')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    // Log audit
+    await auditAPI.logAction('delete', `Deleted saved report: ${id}`, 'admin');
+  }
+};
+
 // Reports API
 export const reportsAPI = {
   async generate(type: string, params: any) {
@@ -1385,7 +1500,22 @@ export const reportsAPI = {
         return transactionDate >= new Date(params.startDate) && 
                transactionDate <= new Date(params.endDate);
       }) || [];
+    } else {
+      // If no period specified or period is 'all', use all transactions
+      filteredTransactions = transactions || [];
     }
+
+    // If no transactions found for the period, use all transactions as fallback
+    if (filteredTransactions.length === 0 && transactions && transactions.length > 0) {
+      console.log('⚠️ No transactions found for period, using all transactions as fallback');
+      filteredTransactions = transactions;
+    }
+
+    // Debug: Log the fetched data
+    console.log('🔍 Fetched transactions:', transactions?.length || 0);
+    console.log('🔍 Filtered transactions:', filteredTransactions.length);
+    console.log('🔍 Sample transaction:', filteredTransactions[0]);
+    console.log('🔍 Period:', params.period);
 
     // Calculate report statistics
     const totalAmount = filteredTransactions.reduce((sum, t) => sum + (t.debit_amount || 0), 0);
@@ -1394,6 +1524,9 @@ export const reportsAPI = {
       acc[t.category] = (acc[t.category] || 0) + (t.debit_amount || 0);
       return acc;
     }, {} as Record<string, number>);
+
+    console.log('🔍 Total amount calculated:', totalAmount);
+    console.log('🔍 Category breakdown:', categoryBreakdown);
 
     // Generate report data
     const reportData = {
@@ -1422,14 +1555,14 @@ export const reportsAPI = {
     let fileContent, mimeType;
     
     if (params.format?.toUpperCase() === 'PDF') {
-      // Generate PDF content for tax summary
+      // For PDF reports, store the structured data that will be converted to PDF on download
       if (type === 'tax_summary') {
-        fileContent = generateTaxSummaryPDF(reportData);
-        mimeType = 'application/pdf';
+        fileContent = JSON.stringify(reportData, null, 2);
+        mimeType = 'application/json'; // Store as JSON, will be converted to PDF on download
       } else {
-        // For other reports, generate PDF
+        // For other reports, generate HTML content
         fileContent = generateReportPDF(reportData);
-        mimeType = 'application/pdf';
+        mimeType = 'text/html';
       }
     } else if (params.format?.toUpperCase() === 'CSV') {
       // Generate CSV content
@@ -1476,9 +1609,15 @@ export const reportsAPI = {
 
     // Transform database reports to match expected format
     return reports?.map(report => {
-      // Extract format from file_url
-      const format = report.file_url.includes('application/pdf') ? 'PDF' : 
-                    report.file_url.includes('text/csv') ? 'CSV' : 'JSON';
+      // Extract format from file_url - for tax_summary reports stored as JSON, show as PDF
+      let format = 'JSON';
+      if (report.file_url.includes('text/csv')) {
+        format = 'CSV';
+      } else if (report.file_url.includes('text/html')) {
+        format = 'PDF';
+      } else if (report.report_type === 'tax_summary' && report.file_url.includes('application/json')) {
+        format = 'PDF'; // Tax summary reports are stored as JSON but should be shown as PDF
+      }
       
       return {
         id: report.id,

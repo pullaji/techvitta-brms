@@ -9,7 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { authAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
 
-export default function Login() {
+export default function Login() { 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({

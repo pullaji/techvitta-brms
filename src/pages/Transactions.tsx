@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -17,7 +18,8 @@ import {
   Edit3,
   Eye,
   ExternalLink,
-  X
+  X,
+  Save
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,10 +32,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProofInput } from "@/components/ProofInput";
 import { InlineProofUpload } from "@/components/InlineProofUpload";
 import { SpendingChart } from "@/components/SpendingChart";
-import { transactionsAPI } from "@/services/supabaseApi";
+import { transactionsAPI, savedReportsAPI } from "@/services/supabaseApi";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCSV, exportToExcel } from "@/utils/exportUtils";
 import { supabase } from "@/lib/supabase";
+import { downloadTaxSummaryPDF } from "@/utils/pdfGenerator";
+import { generateTransactionExcel, downloadExcel } from "@/utils/transactionExcelGenerator";
+import * as XLSX from 'xlsx';
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -81,9 +86,12 @@ const isImageUrl = (url: string) => {
 };
 
 
+
 export default function Transactions() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
   const [searchTerm, setSearchTerm] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState({ start: "", end: "" });
   const [sortBy, setSortBy] = useState("date");
@@ -95,6 +103,9 @@ export default function Transactions() {
   const [isViewProofModalOpen, setIsViewProofModalOpen] = useState(false);
   const [viewingTransaction, setViewingTransaction] = useState<any>(null);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
+  const [viewReportMode, setViewReportMode] = useState(false);
+  const [reportTransactions, setReportTransactions] = useState<any[]>([]);
+  const [reportName, setReportName] = useState("");
   const [proofData, setProofData] = useState({
     proof: "",
     proofFile: null as File | null
@@ -102,7 +113,6 @@ export default function Transactions() {
   const [formData, setFormData] = useState({
     notes: "",
     date: "",
-    category: "",
     type: "",
     description: "",
     transaction_name: "",
@@ -113,6 +123,29 @@ export default function Transactions() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Check for report data from Reports page
+  useEffect(() => {
+    const viewReportDataStr = sessionStorage.getItem('viewReportData');
+    if (viewReportDataStr && location.state?.fromReport) {
+      try {
+        const viewReportData = JSON.parse(viewReportDataStr);
+        setViewReportMode(true);
+        setReportTransactions(viewReportData.transactions || []);
+        setReportName(viewReportData.reportName || 'Saved Report');
+        
+        // Clear sessionStorage after loading
+        sessionStorage.removeItem('viewReportData');
+        
+        toast({
+          title: "Report Loaded",
+          description: `Viewing ${viewReportData.transactions?.length || 0} transactions from ${viewReportData.reportName}`,
+        });
+      } catch (error) {
+        console.error('Error loading report data:', error);
+      }
+    }
+  }, [location, toast]);
 
 
   // Create transaction mutation
@@ -128,7 +161,6 @@ export default function Transactions() {
       setFormData({
         notes: "",
         date: "",
-        category: "",
         type: "",
         description: "",
         transaction_name: "",
@@ -346,11 +378,10 @@ export default function Transactions() {
     });
   };
 
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.notes || !formData.date || !formData.category || !formData.type) {
+    if (!formData.notes || !formData.date || !formData.type) {
       toast({
         title: "Error",
         description: "Please fill in all required fields.",
@@ -375,7 +406,7 @@ export default function Transactions() {
       payment_type: formData.type as 'receipt' | 'bank_transfer' | 'upi' | 'cash' | 'other',
       transaction_name: formData.transaction_name || formData.notes || 'Manual transaction',
       description: formData.description || formData.notes || 'Manual transaction',
-      category: formData.category,
+      category: 'Other', // Default category
       credit_amount: creditAmount,
       debit_amount: debitAmount,
       proof: formData.proof || null,
@@ -389,10 +420,14 @@ export default function Transactions() {
   };
 
   // Fetch transactions from Supabase
-  const { data: transactions, isLoading, error } = useQuery({
+  const { data: fetchedTransactions, isLoading, error } = useQuery({
     queryKey: ['transactions', showAll],
     queryFn: () => transactionsAPI.getAll({ showAll }),
+    enabled: !viewReportMode, // Don't fetch if viewing report
   });
+
+  // Use reportTransactions if in viewReportMode, otherwise use fetched transactions
+  const transactions = viewReportMode ? reportTransactions : fetchedTransactions;
 
   // Get the source file name for display
   const latestSourceFile = transactions && transactions.length > 0 ? transactions[0]?.source_file : null;
@@ -405,9 +440,7 @@ export default function Transactions() {
       transaction.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       false;
 
-    // Category filter
-    const matchesCategory = !categoryFilter || categoryFilter === "all" || 
-      transaction.category === categoryFilter;
+    // Category filter - removed
 
     // Type filter
     const matchesType = !typeFilter || typeFilter === "all" || 
@@ -421,7 +454,7 @@ export default function Transactions() {
     // Amount filter - removed net amount calculation
     const matchesAmountRange = true;
 
-    return matchesSearch && matchesCategory && matchesType && matchesDateRange && matchesAmountRange;
+    return matchesSearch && matchesType && matchesDateRange && matchesAmountRange;
   }).sort((a, b) => {
     // Sorting logic
     let aValue: any, bValue: any;
@@ -430,10 +463,6 @@ export default function Transactions() {
       case 'date':
         aValue = new Date(a.date);
         bValue = new Date(b.date);
-        break;
-      case 'category':
-        aValue = a.category || '';
-        bValue = b.category || '';
         break;
       case 'description':
         aValue = a.transaction_name || '';
@@ -451,9 +480,174 @@ export default function Transactions() {
     }
   }) || [];
 
-  const categories = [...new Set(transactions?.map(t => t.category) || [])];
   const types = [...new Set(transactions?.map(t => t.payment_type) || [])];
 
+  // Save all function - generates Excel and saves to reports
+  const handleSaveAll = async () => {
+    if (!transactions || transactions.length === 0) {
+      toast({
+        title: "No data to save",
+        description: "Please ensure there are transactions to save.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Generate report name
+      const reportName = `All Transactions - ${new Date().toLocaleDateString()}`;
+      const filename = `all_transactions_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      // Create Excel content using the same data structure
+      const exportData = transactions.map(t => ({
+        date: t.date,
+        payment_type: t.payment_type,
+        transaction_name: t.transaction_name,
+        description: t.description,
+        category: t.category,
+        credit_amount: t.credit_amount || 0,
+        debit_amount: t.debit_amount || 0,
+        balance: t.balance,
+        source_file: t.source_file,
+        source_type: t.source_type,
+        notes: t.notes,
+        proof: t.proof,
+        created_at: t.created_at
+      }));
+
+      // Calculate summary data for Excel - ensure proper number conversion
+      const totalTransactions = transactions.length;
+      const totalCredits = transactions.reduce((sum, t) => {
+        const amount = t.credit_amount ? parseFloat(t.credit_amount) : 0;
+        return sum + amount;
+      }, 0);
+      const totalDebits = transactions.reduce((sum, t) => {
+        const amount = t.debit_amount ? parseFloat(t.debit_amount) : 0;
+        return sum + amount;
+      }, 0);
+      const currentBalance = transactions.length > 0 && transactions[transactions.length - 1]?.balance ? 
+        parseFloat(transactions[transactions.length - 1].balance) : 0;
+      
+      // Calculate date range
+      const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d.getTime()));
+      const startingDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))).toISOString().split('T')[0] : '';
+      const endingDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))).toISOString().split('T')[0] : '';
+
+      // Debug: Log the data being passed to Excel generator
+      console.log('Excel Generation Data:', {
+        totalTransactions,
+        totalCredits,
+        totalDebits,
+        currentBalance,
+        startingDate,
+        endingDate,
+        sampleTransaction: exportData[0],
+        allTransactions: exportData.length
+      });
+
+      // Generate Excel document
+      const excelWorkbook = generateTransactionExcel({
+        transactions: exportData,
+        summary: {
+          totalTransactions,
+          totalCredits,
+          totalDebits,
+          currentBalance,
+          startingDate,
+          endingDate
+        },
+        reportName
+      });
+
+      // Generate Excel blob for upload
+      const excelBlob = new Blob([XLSX.write(excelWorkbook, { bookType: 'xlsx', type: 'array' })], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const excelFile = new File([excelBlob], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      
+      // Upload Excel to Supabase storage (optional - continue even if this fails)
+      let excelUrl = null;
+      try {
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('reports')
+          .upload(`excel-reports/${filename}`, excelFile, {
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.warn('Excel upload failed (storage bucket may not exist):', uploadError.message);
+          // Continue without Excel URL - the local download will still work
+        } else {
+          // Get the public URL for the uploaded Excel
+          const { data: urlData } = supabase.storage
+            .from('reports')
+            .getPublicUrl(`excel-reports/${filename}`);
+          excelUrl = urlData?.publicUrl || null;
+        }
+      } catch (storageError) {
+        console.warn('Storage bucket not available, continuing without cloud storage:', storageError);
+        // Continue without Excel URL
+      }
+
+      // Save to database for Reports page (required for Reports page functionality)
+      try {
+        const savedReport = await savedReportsAPI.saveFilteredTransactions(
+          transactions,
+          {
+            searchTerm: '',
+            typeFilter: 'all',
+            dateRangeFilter: { start: '', end: '' },
+            sortBy: 'date',
+            sortOrder: 'desc',
+            showAll: true,
+            note: 'All transactions saved as Excel from Transactions page',
+            pdfUrl: excelUrl, // Using pdfUrl field for Excel URL
+            pdfFilename: filename
+          },
+          reportName
+        );
+        
+        // Refresh data to show updated state
+        queryClient.invalidateQueries({ queryKey: ['saved-reports'] });
+        
+        toast({
+          title: "Save successful!",
+          description: `Report saved successfully! ${transactions.length} transactions saved to Reports page. You can view and download the Excel file from the Reports section.`,
+        });
+        
+      } catch (dbError) {
+        console.error('Database save failed:', dbError);
+        
+        // If database save fails, fallback to direct download
+        downloadExcel(excelWorkbook, filename);
+        
+        // Check if it's a table not found error
+        if (dbError.message?.includes('Database table not found') || 
+            dbError.message?.includes('Could not find the table')) {
+          toast({
+            title: "Database Setup Required",
+            description: "Please run the database setup script (database/FIX_ALL_ERRORS.sql) in your Supabase SQL Editor to enable Reports page functionality.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Partial Success",
+            description: `Excel downloaded locally. Database save failed - please check your database connection.`,
+            variant: "destructive",
+          });
+        }
+      }
+
+    } catch (error: any) {
+      console.error('Save error:', error);
+      toast({
+        title: "Save failed",
+        description: error.message || "Failed to save transactions. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -489,10 +683,37 @@ export default function Transactions() {
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div className="mb-4 sm:mb-0">
-              <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Transactions</h1>
-              <p className="text-muted-foreground text-sm sm:text-base">
-                Manage and track all your financial transactions
-              </p>
+              {viewReportMode ? (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setViewReportMode(false);
+                        setReportTransactions([]);
+                        setReportName("");
+                        navigate('/transactions', { replace: true });
+                      }}
+                    >
+                      ← Back to All Transactions
+                    </Button>
+                  </div>
+                  <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">
+                    {reportName}
+                  </h1>
+                  <p className="text-muted-foreground text-sm sm:text-base">
+                    Viewing saved report with {reportTransactions.length} transactions
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1 className="heading-xl text-2xl sm:text-3xl lg:text-4xl mb-2">Transactions</h1>
+                  <p className="text-muted-foreground text-sm sm:text-base">
+                    Manage and track all your financial transactions
+                  </p>
+                </>
+              )}
             </div>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -511,10 +732,10 @@ export default function Transactions() {
                   <span className="sm:hidden">Excel</span>
                 </Button>
               </div>
-              <Button className="btn-gradient w-full sm:w-auto text-sm" onClick={() => setIsAddModalOpen(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                <span className="hidden sm:inline">Add Transaction</span>
-                <span className="sm:hidden">Add Transaction</span>
+              <Button className="btn-gradient w-full sm:w-auto text-sm" onClick={handleSaveAll}>
+                <Save className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Save Excel</span>
+                <span className="sm:hidden">Save Excel</span>
               </Button>
             </motion.div>
           </div>
@@ -530,7 +751,7 @@ export default function Transactions() {
           <Card className="card-elevated p-4 sm:p-6">
             <div className="space-y-4">
               {/* First row - Basic filters */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {/* Search */}
                 <div className="space-y-1">
                   <Label htmlFor="search" className="text-xs font-medium text-muted-foreground">
@@ -548,25 +769,6 @@ export default function Transactions() {
                   </div>
                 </div>
 
-                {/* Category Filter */}
-                <div className="space-y-1">
-                  <Label htmlFor="category" className="text-xs font-medium text-muted-foreground">
-                    Category
-                  </Label>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="h-9 text-sm border-border/50 focus:border-primary/50">
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category?.replace('_', ' ') || category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                </div>
 
                 {/* Type Filter */}
                 <div className="space-y-1">
@@ -599,7 +801,6 @@ export default function Transactions() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="date">Date</SelectItem>
-                    <SelectItem value="category">Category</SelectItem>
                     <SelectItem value="description">Description</SelectItem>
                   </SelectContent>
                 </Select>
@@ -740,7 +941,6 @@ export default function Transactions() {
                     <th className="text-left p-4 font-medium text-sm">Date</th>
                     <th className="text-left p-4 font-medium text-sm">Payment Type</th>
                     <th className="text-left p-4 font-medium text-sm">Description</th>
-                    <th className="text-left p-4 font-medium text-sm">Category</th>
                     <th className="text-right p-4 font-medium text-sm">Credit (+₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Debit (-₹)</th>
                     <th className="text-right p-4 font-medium text-sm">Balance (₹)</th>
@@ -777,11 +977,6 @@ export default function Transactions() {
                           <div className="text-sm">
                             {transaction.description || transaction.notes || 'No description'}
                           </div>
-                        </td>
-                        <td className="p-4">
-                          <Badge variant="secondary" className="text-xs">
-                            {transaction.category}
-                          </Badge>
                         </td>
                         <td className="p-4">
                           <div className="font-semibold text-right text-green-600">
@@ -919,12 +1114,9 @@ export default function Transactions() {
                     </div>
                   )}
                   
-                  {/* Category and Payment Type */}
+                  {/* Payment Type */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
-                      <Badge variant="secondary" className="text-xs px-2 py-1">
-                        {transaction.category?.replace('_', ' ') || 'Uncategorized'}
-                      </Badge>
                       <Badge variant="outline" className="text-xs px-2 py-1">
                         {transaction.payment_type?.replace('_', ' ') || 'receipt'}
                       </Badge>
@@ -1058,54 +1250,32 @@ export default function Transactions() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="date">Date *</Label>
-                  <Input
-                    id="date"
-                    name="date"
-                    type="date"
-                    value={formData.date}
-                    onChange={handleInputChange}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category">Category *</Label>
-                  <Select value={formData.category} onValueChange={(value) => handleSelectChange('category', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Business Expense">Business Expense</SelectItem>
-                      <SelectItem value="Personal Expense">Personal Expense</SelectItem>
-                      <SelectItem value="Travel & Transport">Travel & Transport</SelectItem>
-                      <SelectItem value="Meals & Entertainment">Meals & Entertainment</SelectItem>
-                      <SelectItem value="Office Supplies">Office Supplies</SelectItem>
-                      <SelectItem value="Software & Subscriptions">Software & Subscriptions</SelectItem>
-                      <SelectItem value="Utilities">Utilities</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="date">Date *</Label>
+                <Input
+                  id="date"
+                  name="date"
+                  type="date"
+                  value={formData.date}
+                  onChange={handleInputChange}
+                  required
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="type">Type *</Label>
-                  <Select value={formData.type} onValueChange={(value) => handleSelectChange('type', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="receipt">Receipt</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                      <SelectItem value="upi">UPI</SelectItem>
-                      <SelectItem value="cash">Cash</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="type">Type *</Label>
+                <Select value={formData.type} onValueChange={(value) => handleSelectChange('type', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="receipt">Receipt</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
