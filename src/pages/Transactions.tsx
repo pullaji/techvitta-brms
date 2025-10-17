@@ -335,7 +335,7 @@ export default function Transactions() {
 
   // Export functions
   const handleExportCSV = () => {
-    if (!transactions || transactions.length === 0) {
+    if (!filteredTransactions || filteredTransactions.length === 0) {
       toast({
         title: "No data to export",
         description: "Please ensure there are transactions to export.",
@@ -345,7 +345,7 @@ export default function Transactions() {
     }
 
     // Convert transaction data to the format expected by export function
-    const exportData = transactions.map(t => ({
+    const exportData = filteredTransactions.map(t => ({
       date: t.date,
       payment_type: t.payment_type,
       transaction_name: t.transaction_name,
@@ -363,9 +363,9 @@ export default function Transactions() {
 
     // Debug: Log export data
     console.log('📊 Export Data Debug:', {
-      totalTransactions: transactions.length,
+      totalTransactions: filteredTransactions.length,
       exportDataLength: exportData.length,
-      sampleTransaction: transactions[0],
+      sampleTransaction: filteredTransactions[0],
       sampleExportData: exportData[0]
     });
 
@@ -374,7 +374,7 @@ export default function Transactions() {
     
     toast({
       title: "Export successful!",
-      description: `Transactions exported to ${filename} with clickable proof links`,
+      description: `${filteredTransactions.length} filtered transactions exported to ${filename} with clickable proof links`,
     });
   };
 
@@ -484,7 +484,7 @@ export default function Transactions() {
 
   // Save all function - generates Excel and saves to reports
   const handleSaveAll = async () => {
-    if (!transactions || transactions.length === 0) {
+    if (!filteredTransactions || filteredTransactions.length === 0) {
       toast({
         title: "No data to save",
         description: "Please ensure there are transactions to save.",
@@ -499,7 +499,7 @@ export default function Transactions() {
       const filename = `all_transactions_${new Date().toISOString().split('T')[0]}.xlsx`;
 
       // Create Excel content using the same data structure
-      const exportData = transactions.map(t => ({
+      const exportData = filteredTransactions.map(t => ({
         date: t.date,
         payment_type: t.payment_type,
         transaction_name: t.transaction_name,
@@ -516,20 +516,20 @@ export default function Transactions() {
       }));
 
       // Calculate summary data for Excel - ensure proper number conversion
-      const totalTransactions = transactions.length;
-      const totalCredits = transactions.reduce((sum, t) => {
+      const totalTransactions = filteredTransactions.length;
+      const totalCredits = filteredTransactions.reduce((sum, t) => {
         const amount = t.credit_amount ? parseFloat(t.credit_amount) : 0;
         return sum + amount;
       }, 0);
-      const totalDebits = transactions.reduce((sum, t) => {
+      const totalDebits = filteredTransactions.reduce((sum, t) => {
         const amount = t.debit_amount ? parseFloat(t.debit_amount) : 0;
         return sum + amount;
       }, 0);
-      const currentBalance = transactions.length > 0 && transactions[transactions.length - 1]?.balance ? 
-        parseFloat(transactions[transactions.length - 1].balance) : 0;
+      const currentBalance = filteredTransactions.length > 0 && filteredTransactions[filteredTransactions.length - 1]?.balance ? 
+        parseFloat(filteredTransactions[filteredTransactions.length - 1].balance) : 0;
       
       // Calculate date range
-      const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d.getTime()));
+      const dates = filteredTransactions.map(t => new Date(t.date)).filter(d => !isNaN(d.getTime()));
       const startingDate = dates.length > 0 ? new Date(Math.min(...dates.map(d => d.getTime()))).toISOString().split('T')[0] : '';
       const endingDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))).toISOString().split('T')[0] : '';
 
@@ -593,15 +593,15 @@ export default function Transactions() {
       // Save to database for Reports page (required for Reports page functionality)
       try {
         const savedReport = await savedReportsAPI.saveFilteredTransactions(
-          transactions,
+          filteredTransactions,
           {
-            searchTerm: '',
-            typeFilter: 'all',
-            dateRangeFilter: { start: '', end: '' },
-            sortBy: 'date',
-            sortOrder: 'desc',
-            showAll: true,
-            note: 'All transactions saved as Excel from Transactions page',
+            searchTerm: searchTerm,
+            typeFilter: typeFilter || 'all',
+            dateRangeFilter: dateRangeFilter,
+            sortBy: sortBy,
+            sortOrder: sortOrder,
+            showAll: showAll,
+            note: 'Filtered transactions saved as Excel from Transactions page',
             pdfUrl: excelUrl, // Using pdfUrl field for Excel URL
             pdfFilename: filename
           },
@@ -613,7 +613,7 @@ export default function Transactions() {
         
         toast({
           title: "Save successful!",
-          description: `Report saved successfully! ${transactions.length} transactions saved to Reports page. You can view and download the Excel file from the Reports section.`,
+          description: `Report saved successfully! ${filteredTransactions.length} transactions saved to Reports page. You can view and download the Excel file from the Reports section.`,
         });
         
       } catch (dbError) {
